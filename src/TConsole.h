@@ -114,14 +114,12 @@ public:
         mWrapAt = pos;
         buffer.setWrapAt(pos);
     }
+    int getWrapAt();
 
     void setIndentCount(int count)
     {
         mIndentCount = count;
         buffer.setWrapIndent(count);
-    }
-    int getWrapAt() {
-        return mWrapAt;
     }
 
     TLinkStore &getLinkStore() { return buffer.mLinkStore; }
