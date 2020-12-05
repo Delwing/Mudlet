@@ -1812,7 +1812,7 @@ int TLuaInterpreter::getWindowWrap(lua_State* L)
     }
 
     auto console = CONSOLE(L, windowName);
-    lua_pushnumber(L, console->getWrapAt(luaFrom))
+    lua_pushnumber(L, console->getWrapAt());
     return 1;
 }
 
