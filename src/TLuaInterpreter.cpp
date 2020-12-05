@@ -1803,6 +1803,19 @@ int TLuaInterpreter::setWindowWrap(lua_State* L)
     return 0;
 }
 
+// Documentation: https://wiki.mudlet.org/w/Manual:Lua_Functions#getWindowWrap
+int TLuaInterpreter::getWindowWrap(lua_State* L)
+{
+    QString windowName;
+    if (lua_gettop(L) > 1) {
+        windowName = WINDOW_NAME(L, 1);
+    }
+
+    auto console = CONSOLE(L, windowName);
+    lua_pushnumber(L, console->getWrapAt(luaFrom))
+    return 1;
+}
+
 // Documentation: https://wiki.mudlet.org/w/Manual:Lua_Functions#setWindowWrapIndent
 int TLuaInterpreter::setWindowWrapIndent(lua_State* L)
 {

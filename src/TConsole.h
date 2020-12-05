@@ -120,6 +120,9 @@ public:
         mIndentCount = count;
         buffer.setWrapIndent(count);
     }
+    int getWrapAt() {
+        return mWrapAt;
+    }
 
     TLinkStore &getLinkStore() { return buffer.mLinkStore; }
     void echo(const QString&);
@@ -256,7 +259,7 @@ public:
     bool mTriggerEngineMode;
 
     QPoint mUserCursor;
-    int mWrapAt;
+    int mWra        pAt;
     QLineEdit* mpLineEdit_networkLatency;
     QPoint P_begin;
     QPoint P_end;
