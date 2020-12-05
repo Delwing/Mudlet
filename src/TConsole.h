@@ -259,7 +259,7 @@ public:
     bool mTriggerEngineMode;
 
     QPoint mUserCursor;
-    int mWra        pAt;
+    int mWrapAt;
     QLineEdit* mpLineEdit_networkLatency;
     QPoint P_begin;
     QPoint P_end;
