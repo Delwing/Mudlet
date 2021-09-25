@@ -1765,6 +1765,9 @@ void TTextEdit::showEvent(QShowEvent* event)
 void TTextEdit::resizeEvent(QResizeEvent* event)
 {
     updateScreenView();
+    // Adjust for upcoming resize of visible region
+    auto diff = event->size() - event->oldSize();
+    mScreenHeight += ( diff.height() / mFontHeight );
     if (!mIsLowerPane && mpConsole->getType() != TConsole::CentralDebugConsole) {
         // CHECKME: This looks suspect - it would seem to be called on resizing
         // floating user windows, and the Editor's Error TConsole as well as
