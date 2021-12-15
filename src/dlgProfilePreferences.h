@@ -38,6 +38,7 @@
 #include <QDir>
 #include <QDoubleSpinBox>
 #include <QMap>
+#include <QKeySequenceEdit>
 #include "post_guard.h"
 
 class Host;
@@ -193,6 +194,7 @@ private:
     void hidePasswordMigrationLabel();
     void setupPasswordsMigration();
     QString mapSaveLoadDirectory(Host* pHost);
+    void validateKeySequences();
 
     int mFontSize;
     QPointer<Host> mpHost;
@@ -203,6 +205,7 @@ private:
     QPointer<QDoubleSpinBox> mpDoubleSpinBox_mapSymbolFontFudge;
     std::unique_ptr<QTimer> hidePasswordMigrationLabelTimer;
     QMap<QString, QKeySequence*> currentShortcuts;
+    QList<QKeySequenceEdit*> keySequenceEdits;
 
     QString mLogDirPath;
     // Needed to remember the state on construction so that we can sent the same

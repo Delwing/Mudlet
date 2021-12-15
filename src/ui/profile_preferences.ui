@@ -6,7 +6,7 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>777</width>
+    <width>942</width>
     <height>761</height>
    </rect>
   </property>
@@ -42,7 +42,7 @@
       <enum>QTabWidget::Rounded</enum>
      </property>
      <property name="currentIndex">
-      <number>0</number>
+      <number>9</number>
      </property>
      <widget class="QWidget" name="tab_general">
       <property name="sizePolicy">
@@ -3383,12 +3383,29 @@ you can use it but there could be issues with aligning columns of text</string>
             </property>
            </layout>
           </item>
-          <item alignment="Qt::AlignRight">
-           <widget class="QPushButton" name="pushButton_resetMainWindowShortctus">
-            <property name="text">
-             <string>Reset to defaults</string>
-            </property>
-           </widget>
+          <item>
+           <layout class="QHBoxLayout" name="horizontalLayout">
+            <item alignment="Qt::AlignLeft">
+             <widget class="QLabel" name="label_shortcutsWarnings">
+              <property name="autoFillBackground">
+               <bool>false</bool>
+              </property>
+              <property name="styleSheet">
+               <string notr="true">color: red</string>
+              </property>
+              <property name="text">
+               <string/>
+              </property>
+             </widget>
+            </item>
+            <item alignment="Qt::AlignRight|Qt::AlignBottom">
+             <widget class="QPushButton" name="pushButton_resetMainWindowShortctus">
+              <property name="text">
+               <string>Reset to defaults</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
           </item>
          </layout>
         </widget>

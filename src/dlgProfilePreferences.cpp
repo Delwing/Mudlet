@@ -1160,12 +1160,13 @@ void dlgProfilePreferences::initWithHost(Host* pHost)
     //Shortcuts tab
     auto shortcutKeys = mudlet::self()->mShortcutsManager->iterator();
     int shortcutsRow = 0;
+    keySequenceEdits.clear();
     while (shortcutKeys.hasNext()) {
         auto key = shortcutKeys.next();
         QKeySequence* sequence = new QKeySequence(*pHost->profileShortcuts.value(key));
         currentShortcuts.insert(key, sequence);
         auto sequenceEdit = new QKeySequenceEdit(*sequence);
-
+        keySequenceEdits << sequenceEdit;
         gridLayout_groupBox_shortcuts->addWidget(new QLabel(mudlet::self()->mShortcutsManager->getLabel(key)), floor(shortcutsRow / 2), (shortcutsRow % 2) * 2 + 1);
         gridLayout_groupBox_shortcuts->addWidget(sequenceEdit, floor(shortcutsRow / 2), (shortcutsRow % 2) * 2 + 2);
         shortcutsRow++;
@@ -1181,15 +1182,53 @@ void dlgProfilePreferences::initWithHost(Host* pHost)
             sequenceEdit->setKeySequence(*newSequence);
             sequence->swap(*newSequence);
             delete newSequence;
+            validateKeySequences();
         });
         connect(this, &dlgProfilePreferences::signal_resetMainWindowShortcutsToDefaults, sequenceEdit, [=]() {
             sequenceEdit->setKeySequence(*mudlet::self()->mShortcutsManager->getDefault(key));
             QKeySequence* newSequence = new QKeySequence(*mudlet::self()->mShortcutsManager->getDefault(key));
             sequence->swap(*newSequence);
             delete newSequence;
+            validateKeySequences();
         });
     }
 
+}
+
+void dlgProfilePreferences::validateKeySequences()
+{
+    QList<QKeySequence> forbidden{
+            QKeySequence::Cut,
+            QKeySequence::Copy,
+            QKeySequence::Paste,
+            QKeySequence::Delete,
+            QKeySequence::Backspace
+    };
+    QStringList warnings;
+    label_shortcutsWarnings->setText("");
+    for (auto firstEdit: keySequenceEdits) {
+        firstEdit->setStyleSheet("");
+        if (firstEdit->keySequence().isEmpty()) {
+            continue;
+        }
+        int warningSize = warnings.count();
+        for (auto secondEdit: keySequenceEdits) {
+            if (firstEdit != secondEdit && firstEdit->keySequence() == secondEdit->keySequence()) {
+                warnings << tr("Duplicate key sequences selected.");
+            }
+        }
+        if (forbidden.contains(firstEdit->keySequence())) {
+            warnings << tr("Sequence cannot be used.");
+        }
+        if (warningSize < warnings.count()) {
+            firstEdit->setStyleSheet(qsl("background-color: rgba(255, 150, 150, 50)"));
+        }
+    }
+
+    warnings.removeDuplicates();
+    if (!warnings.isEmpty()) {
+        label_shortcutsWarnings->setText(warnings.join(qsl("\n")));
+    }
 }
 
 void dlgProfilePreferences::disconnectHostRelatedControls()
