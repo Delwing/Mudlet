@@ -28,6 +28,7 @@
 #include <chrono>
 #include <QCommandLineParser>
 #include <QDir>
+#include <QQmlApplicationEngine>
 #if defined(Q_OS_WIN32) && !defined(INCLUDE_UPDATER)
 #include <QMessageBox>
 #endif // defined(Q_OS_WIN32) && !defined(INCLUDE_UPDATER)
@@ -531,6 +532,10 @@ int main(int argc, char* argv[])
     });
 
     app->restoreOverrideCursor();
+
+    QQmlApplicationEngine engine;
+    engine.addImportPath("C:/Qt/5.14.2/mingw73_32/qml");
+    engine.load(QUrl::fromLocalFile(QString("D:/main.qml")));
 
     // NOTE: Must restore cursor - BEWARE DEBUGGERS if you terminate application
     // without doing/reaching this restore - it can be quite hard to accurately

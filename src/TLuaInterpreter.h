@@ -57,6 +57,7 @@ extern "C" {
 #include <memory>
 
 #include "TTrigger.h"
+#include <QQmlApplicationEngine>
 
 
 class Host;
@@ -110,7 +111,7 @@ public:
     void setGMCPTable(QString&, const QString&);
     void setMSSPTable(const QString&);
     void setChannel102Table(int& var, int& arg);
-    bool compileAndExecuteScript(const QString&);
+    Q_INVOKABLE bool compileAndExecuteScript(const QString&);
     QString formatLuaCode(const QString &);
     void loadGlobal();
     QString getLuaString(const QString& stringName);
@@ -637,6 +638,7 @@ public:
     static int getBackgroundColor(lua_State* L);
     static int getLabelStyleSheet(lua_State* L);
     static int getLabelSizeHint(lua_State* L);
+    static int createForm(lua_State* L);
     // PLACEMARKER: End of Lua functions declarations
 
 
@@ -700,6 +702,7 @@ private:
     const int LUA_FUNCTION_MAX_ARGS = 50;
 
 
+    QQmlApplicationEngine engine;
     QNetworkAccessManager* mpFileDownloader;
     QFileSystemWatcher* mpFileSystemWatcher;
     std::list<std::string> mCaptureGroupList;
@@ -708,6 +711,7 @@ private:
     std::list<std::list<int>> mMultiCaptureGroupPosList;
     QVector<QPair<QString, QString>> mCapturedNameGroups;
     QMap<QString, QPair<int, int>> mCapturedNameGroupsPosList;
+    QMap<QString, QObject*> qmlObjects;
     QVector<QVector<QPair<QString, QString>>> mMultiCaptureNameGroups;
 
     QMap<QNetworkReply*, QString> downloadMap;

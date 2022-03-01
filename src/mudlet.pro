@@ -74,7 +74,7 @@ msvc:QMAKE_CXXFLAGS += -MP
 # Mac specific flags.
 macx:QMAKE_MACOSX_DEPLOYMENT_TARGET = 10.13
 
-QT += network uitools multimedia gui concurrent
+QT += network uitools multimedia gui concurrent qml quick quickcontrols2
 qtHaveModule(gamepad) {
     QT += gamepad
     !build_pass : message("Using Gamepad module")

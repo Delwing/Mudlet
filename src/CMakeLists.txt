@@ -341,7 +341,13 @@ find_package(
              OpenGL
              UiTools
              Widgets
-             Concurrent)
+             Concurrent
+             Qml
+             Quick
+             Quickcontrols2
+             QuickTemplates2
+             Quickwidgets
+)
 find_package(Qt5 COMPONENTS Gamepad QUIET)
 find_package(Qt5 COMPONENTS TextToSpeech QUIET)
 
@@ -429,6 +435,11 @@ target_link_libraries(
   Qt5::Network
   Qt5::Multimedia
   Qt5::OpenGL
+  Qt5::Qml
+  Qt5::Quick
+  Qt5::QuickControls2
+  Qt5::QuickTemplates2
+  Qt5::QuickWidgets
   Qt5::UiTools
   Qt5::Widgets
   ZIP::ZIP

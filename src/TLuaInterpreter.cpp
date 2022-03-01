@@ -50,6 +50,7 @@
 #include "dlgMapper.h"
 #include "dlgModuleManager.h"
 #include "dlgTriggerEditor.h"
+#include "TDockWidget.h"
 #include "mudlet.h"
 #if defined(INCLUDE_3DMAPPER)
 #include "glwidget.h"
@@ -67,6 +68,10 @@
 #include <QToolTip>
 #include <QFileInfo>
 #include <QMovie>
+#include <QQmlContext>
+#include <QQuickView>
+#include <QQuickItem>
+#include <QJSValueIterator>
 #include <QVector>
 #ifdef QT_TEXTTOSPEECH_LIB
 #include <QTextToSpeech>
@@ -212,6 +217,7 @@ TLuaInterpreter::TLuaInterpreter(Host* pH, const QString& hostName, int id) : mp
     connect(mpFileSystemWatcher, &QFileSystemWatcher::directoryChanged, this, &TLuaInterpreter::slot_pathChanged);
 
     initLuaGlobals();
+    engine.addImportPath("C:/Qt/5.14.2/mingw73_32/qml");
 
     purgeTimer.start(2s);
 }
@@ -15239,6 +15245,7 @@ void TLuaInterpreter::initLuaGlobals()
     lua_register(pGlobalLua, "getBackgroundColor", TLuaInterpreter::getBackgroundColor);
     lua_register(pGlobalLua, "getLabelStyleSheet", TLuaInterpreter::getLabelStyleSheet);
     lua_register(pGlobalLua, "getLabelSizeHint", TLuaInterpreter::getLabelSizeHint);
+    lua_register(pGlobalLua, "createForm", TLuaInterpreter::createForm);
     // PLACEMARKER: End of main Lua interpreter functions registration
 
     QStringList additionalLuaPaths;
@@ -17255,3 +17262,75 @@ int TLuaInterpreter::getProfileStats(lua_State* L)
     return 1;
 }
 
+int TLuaInterpreter::createForm(lua_State* L)
+{
+
+    QQuickView* view = new QQuickView();
+    QWidget *container = QWidget::createWindowContainer(view);
+
+    Host& host = getHostFromLua(L);
+    host.openWindow("TEST", true, true, "right");
+    host.mpConsole->mDockWidgetMap.value("TEST")->setWidget(container);
+
+    view->rootContext()->setContextProperty("Lua", host.getLuaInterpreter());
+    view->engine()->addImportPath("C:/Qt/5.14.2/mingw73_32/qml");
+    view->setSource(QUrl::fromLocalFile(QString("D:/main.qml")));
+    view->setColor(Qt::transparent);
+    view->show();
+
+
+    auto findChild = [](lua_State* L) -> int
+    {
+        const QQuickView *pView = (const QQuickView*) lua_topointer(L, lua_upvalueindex(1));
+
+        auto childName = getVerifiedString(L, __func__, 1, "name");
+        auto propertyName = getVerifiedString(L, __func__, 2, "propertyName");
+        lua_pushstring(L, childName.toUtf8().constData());
+
+        auto child = pView->rootObject()->findChild<QObject *>(childName);
+        if (child) {
+            auto prop = child->property(propertyName.toUtf8().constData());
+            lua_pushstring(L, prop.toString().toUtf8().constData());
+            return 1;
+        } else {
+            return 0;
+        }
+
+    };
+
+
+    auto runFunction = [](lua_State* L) -> int
+    {
+        const QQuickView *pView = (const QQuickView*) lua_topointer(L, lua_upvalueindex(1));
+
+        int n = lua_gettop(L);
+        auto childId = getVerifiedString(L, __func__, 1, "name");
+        auto functionName = getVerifiedString(L, __func__, 2, "functionName");
+
+        QGenericArgument argumentTable[10];
+        for (int i = 3; i <= n; ++i) {
+            argumentTable[i - 3] = Q_ARG(QString, lua_tostring(L, i));
+        }
+
+        auto item = pView->rootObject()->findChild<QQuickItem*>(childId);
+        QVariant retValue;
+        QMetaObject::invokeMethod(item, functionName.toStdString().c_str(), Q_RETURN_ARG(QVariant, retValue),
+                                  argumentTable[0], argumentTable[1], argumentTable[2], argumentTable[3], argumentTable[4],
+                                  argumentTable[5], argumentTable[6], argumentTable[7], argumentTable[8], argumentTable[9]);
+        lua_pushstring(L, retValue.toString().toUtf8().constData());
+
+        return 1;
+    };
+
+    lua_newtable(L);
+    lua_pushstring(L, "getChild");
+    lua_pushlightuserdata(L, view);
+    lua_pushcclosure(L, findChild, 1);
+    lua_settable(L, -3);
+    lua_pushstring(L, "callFunction");
+    lua_pushlightuserdata(L, view);
+    lua_pushcclosure(L, runFunction, 1);
+    lua_settable(L, -3);
+
+    return 1;
+}
