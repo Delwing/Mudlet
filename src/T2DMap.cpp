@@ -4046,6 +4046,18 @@ void T2DMap::slot_newMap()
     mpMap->mpMapper->resetAreaComboBoxToPlayerRoomArea();
 }
 
+bool T2DMap::validNewAreaName(const QString& newName) const
+{
+    QString value = newName.trimmed();
+    if (value.isEmpty() || !value.compare(mNewAreaNamePlaceholder)) {
+        return false;
+    }
+    if (mpMap->mpRoomDB->getAreaNamesMap().values().contains(value)) {
+        return false;
+    }
+    return true;
+}
+
 void T2DMap::slot_setArea()
 {
     QUiLoader loader;
@@ -4057,14 +4069,69 @@ void T2DMap::slot_setArea()
     if (!set_room_area_dialog) {
         return;
     }
-    arealist_combobox = set_room_area_dialog->findChild<QComboBox*>("arealist_combobox");
-    if (!arealist_combobox) {
+    arealist_combobox = qobject_cast<QComboBox*>(set_room_area_dialog->findChild<QComboBox*>("arealist_combobox"));
+    auto pLabel = qobject_cast<QLabel*>(set_room_area_dialog->findChild<QLabel*>("label"));
+    auto pButtonBox = qobject_cast<QDialogButtonBox*>(set_room_area_dialog->findChild<QDialogButtonBox*>("buttonBox"));
+    auto pOkButton = qobject_cast<QPushButton*>(pButtonBox->button(QDialogButtonBox::Ok));
+    if (!arealist_combobox || !pLabel || !pButtonBox || !pOkButton) {
         return;
     }
 
+    pLabel->setText(tr("<p>Which area would you like to move the %n room(s) to?</p>"
+                       "<p>Either select one of the existing areas or chose the first "
+                       "one and edit it to give a name for a new area to be created to receive the "
+                       "selection. The formatting of that new name will lose the italic effect and "
+                       "enable the '%1' button when a valid name is given; however auto-completion will "
+                       "try to select an existing name if the characters entered match one so typing "
+                       "will need to be continued to override it to complete the new name.</p>",
+                       // Intentional comment to separate arguments
+                       "The %1 will contain the text that the 'Ok' button has in this dialogue.",
+                       mMultiSelectionSet.size()).arg(pOkButton->text().replace(QLatin1Char('&'), QString())));
+    auto* pContents = new QListWidget(arealist_combobox);
+    pContents->hide();
+    arealist_combobox->setModel(pContents->model());
+
+    connect(arealist_combobox, qOverload<int>(&QComboBox::currentIndexChanged), this, [=](const int newIndex) {
+        if (newIndex > 0) {
+            pOkButton->setEnabled(true);
+            if (arealist_combobox->lineEdit()) {
+                arealist_combobox->lineEdit()->setReadOnly(true);
+                auto itemFont = arealist_combobox->lineEdit()->font();
+                itemFont.setItalic(false);
+                arealist_combobox->lineEdit()->setFont(itemFont);
+            }
+
+        } else if (newIndex == 0) {
+            // set true if the current value can be used as an area name:
+            const bool itemOk = validNewAreaName(arealist_combobox->currentText());
+            // automatically select all the text when we select the first
+            // editable item
+            if (arealist_combobox->lineEdit()) {
+                arealist_combobox->lineEdit()->selectAll();
+                arealist_combobox->lineEdit()->setReadOnly(false);
+                auto itemFont = arealist_combobox->lineEdit()->font();
+                itemFont.setItalic(!itemOk);
+                arealist_combobox->lineEdit()->setFont(itemFont);
+            }
+            pOkButton->setEnabled(itemOk);
+        }
+    });
+
     connect(arealist_combobox, &QComboBox::currentTextChanged, this, [=](QString newText) {
-        auto buttonBox = set_room_area_dialog->findChild<QDialogButtonBox*>("buttonBox");
-        buttonBox->button(QDialogButtonBox::Ok)->setEnabled(!newText.isEmpty());
+        if (arealist_combobox->currentIndex()) {
+            // We are not working on the "(new area)" entry
+            return;
+        }
+
+        const bool itemOk = validNewAreaName(newText);
+        if (arealist_combobox->lineEdit()) {
+            // else we ARE editing the "(new area)" entry
+            auto itemFont = arealist_combobox->lineEdit()->font();
+            // true if the current value can be used as an area name:
+            itemFont.setItalic(!itemOk);
+            arealist_combobox->lineEdit()->setFont(itemFont);
+        }
+        pOkButton->setEnabled(itemOk);
     });
 
     QStringList sortedAreaList;
@@ -4074,13 +4141,28 @@ void T2DMap::slot_setArea()
     sorter.setNumericMode(true);
     sorter.setCaseSensitivity(Qt::CaseInsensitive);
 
-    std::sort( sortedAreaList.begin(), sortedAreaList.end(), sorter);
-
+    std::sort(sortedAreaList.begin(), sortedAreaList.end(), sorter);
 
     const QMap<int, QString>& areaNamesMap = mpMap->mpRoomDB->getAreaNamesMap();
+    arealist_combobox->clear();
     for (int i = 0, total = sortedAreaList.count(); i < total; ++i) {
         int areaId = areaNamesMap.key(sortedAreaList.at(i));
         arealist_combobox->addItem(qsl("%1 (%2)").arg(sortedAreaList.at(i), QString::number(areaId)), QString::number(areaId));
+        auto pItem = pContents->item(i);
+        auto itemFont = pItem->font();
+        itemFont.setItalic(false);
+        pItem->setFont(itemFont);
+    }
+    // Insert a dummy entry that we will allow to be edited, use the string "0"
+    // as the Qt::UserDataRole data item for this entry as 0 is NOT a valid
+    // area ID number, using 0 as the index will put it first:
+    arealist_combobox->insertItem(0, mNewAreaNamePlaceholder, QString::number(0));
+    {
+        // braced to limit scope of local pointers
+        auto pItem = pContents->item(0);
+        auto itemFont = pItem->font();
+        itemFont.setItalic(true);
+        pItem->setFont(itemFont);
     }
 
     if (set_room_area_dialog->exec() == QDialog::Rejected) { // Don't proceed if "cancel" was pressed
@@ -4088,16 +4170,22 @@ void T2DMap::slot_setArea()
     }
 
     auto newArea = arealist_combobox->itemData(arealist_combobox->currentIndex());
-    int  newAreaId;
+    // This is NEVER a valid value so use it as a sentinal:
+    int newAreaId = -2;
     if (newArea.isValid()) {
         newAreaId = newArea.toInt();
-    } else if (sortedAreaList.contains(arealist_combobox->currentText().trimmed())) {
-        newAreaId = mpMap->mpRoomDB->getAreaNamesMap().key(arealist_combobox->currentText());
-    } else {
+    }
+    if (newAreaId == -2) {
+        return;
+    }
+
+    if (!newAreaId) {
+        // A data value of "0" meant that the new area name has been chosen:
         auto newAreaName = arealist_combobox->currentText();
+        // This will do the validation for us:
         newAreaId = mpMap->mpRoomDB->addArea(newAreaName);
         if (!newAreaId) {
-                        mpMap->postMessage(tr("[ ERROR ] - Unable to add \"%1\" as an area to the map.\n"
+            mpMap->postMessage(tr("[ ERROR ] - Unable to add \"%1\" as an area to the map.\n"
                                   "See the \"[MAP ERROR:]\" message for the reason.",
                                   // Intentional separator between argument
                                   "The '[MAP ERROR:]' text should be the same as that used for the translation of \"[MAP ERROR:]%1\n\" in the 'TMAP::logerror(...)' function.").arg(newAreaName));
@@ -4108,6 +4196,9 @@ void T2DMap::slot_setArea()
 
         mpMap->mpMapper->updateAreaComboBox();
     }
+    // else newAreaId is a valid positive one already (because it was stored in
+    // the UserData of the QComboBox)
+
     mMultiRect = QRect(0, 0, 0, 0);
     QSetIterator<int> itSelectedRoom = mMultiSelectionSet;
     while (itSelectedRoom.hasNext()) {

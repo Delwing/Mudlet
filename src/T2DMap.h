@@ -248,6 +248,7 @@ private:
     void initiateSpeedWalk(const int speedWalkStartRoomId, const int speedWalkTargetRoomId);
     inline void drawDoor(QPainter&, const TRoom&, const QString&, const QLineF&);
     void updateMapLabel(QRectF labelRectangle, int labelId, TArea* pArea);
+    bool validNewAreaName(const QString&) const;
 
     bool mDialogLock = false;
     struct ClickPosition {
@@ -289,6 +290,10 @@ private:
 
     dlgRoomProperties* mpDlgRoomProperties = nullptr;
     dlgMapLabel* mpDlgMapLabel = nullptr;
+    QString mNewAreaNamePlaceholder = tr("(New area)",
+                                         // Intentional comment to separate arguments
+                                         "Placeholder text for a QComboBox that has a list of existing map area names "
+                                         "but which also has this dummy value to allow a new one to be entered");
 
 private slots:
     void slot_createRoom();

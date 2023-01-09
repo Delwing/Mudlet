@@ -6,9 +6,15 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>377</width>
-    <height>105</height>
+    <width>440</width>
+    <height>336</height>
    </rect>
+  </property>
+  <property name="sizePolicy">
+   <sizepolicy hsizetype="Preferred" vsizetype="MinimumExpanding">
+    <horstretch>0</horstretch>
+    <verstretch>0</verstretch>
+   </sizepolicy>
   </property>
   <property name="windowTitle">
    <string>Move rooms to another area</string>
@@ -16,8 +22,18 @@
   <layout class="QVBoxLayout" name="verticalLayout">
    <item>
     <widget class="QLabel" name="label">
+     <property name="sizePolicy">
+      <sizepolicy hsizetype="Preferred" vsizetype="MinimumExpanding">
+       <horstretch>0</horstretch>
+       <verstretch>0</verstretch>
+      </sizepolicy>
+     </property>
      <property name="text">
-      <string>Which area would you like to move the room(s) to?</string>
+      <string comment="The %1 will contain the text that the 'Ok' button has in this dialogue.">&lt;p&gt;Which area would you like to move the %n room(s) to?&lt;/p&gt;
+&lt;p&gt;Either select one of the existing areas or chose the first one and edit it to give a name for a new area to be created to receive the selection. The formatting of that new name will lose the italic effect and enable the '%1' button when a valid name is given; however auto-completion will try to select an existing name if the characters entered match one so typing will need to be continued to override it to complete the new name.&lt;/p&gt;</string>
+     </property>
+     <property name="wordWrap">
+      <bool>true</bool>
      </property>
     </widget>
    </item>
