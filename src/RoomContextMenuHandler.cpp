@@ -104,6 +104,8 @@ bool RoomContextMenuHandler::handle(T2DMap::MapInteractionContext& context)
     const int previousSelectionSize = mMapWidget.mMultiSelectionSet.size();
 
     if (context.hasClickedRoom) {
+        mMapWidget.cancelContextMenuSelectionRestore();
+
         const bool isRoomAlreadySelected = mMapWidget.mMultiSelectionSet.contains(context.clickedRoomId);
 
         if (isRoomAlreadySelected) {
@@ -121,6 +123,8 @@ bool RoomContextMenuHandler::handle(T2DMap::MapInteractionContext& context)
             selectionChanged = true;
         }
     } else if (previousSelectionSize <= 1 && previousSelectionSize > 0) {
+        mMapWidget.storeSelectionBeforeContextMenu();
+
         mMapWidget.clearSelection();
         mMapWidget.mMultiSelectionSet.clear();
         mMapWidget.mMultiSelectionHighlightRoomId = 0;

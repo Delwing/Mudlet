@@ -38,6 +38,7 @@
 #include <QString>
 #include <QTreeWidget>
 #include <QWidget>
+#include <QSet>
 #include <QtConcurrent>
 #include "post_guard.h"
 
@@ -211,6 +212,12 @@ public:
     QRectF mMultiRect;
     bool mPopupMenu = false;
     QPointer<QMenu> mActiveContextMenu;
+    QSet<int> mStoredSelectionBeforeContextMenu;
+    int mStoredSelectionHighlightBeforeContextMenu = 0;
+    bool mStoredMultiSelectionStateBeforeContextMenu = false;
+    bool mRestoreSelectionAfterContextMenu = false;
+    bool mCancelContextMenuSelectionRestore = false;
+    bool mContextMenuRestoreQueued = false;
     QSet<int> mMultiSelectionSet;
     QSet<int> mMultiSelectionBaseSet;
     QSet<int> mMultiSelectionAnchorSet;
@@ -365,6 +372,11 @@ private:
     void initiateSpeedWalk(const int speedWalkStartRoomId, const int speedWalkTargetRoomId);
     inline void drawDoor(QPainter&, const TRoom&, const QString&, const QLineF&);
     void updateMapLabel(QRectF labelRectangle, int labelId, TArea* pArea);
+    void storeSelectionBeforeContextMenu();
+    void cancelContextMenuSelectionRestore();
+    void onContextMenuClosed();
+    void restoreSelectionAfterContextMenu();
+    void clearContextMenuSelectionRestoreState();
 
     bool mDialogLock = false;
     struct ClickPosition {
