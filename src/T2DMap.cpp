@@ -56,6 +56,8 @@
 #include <QAction>
 #include <QApplication>
 #include <QCoreApplication>
+#include <QCursor>
+#include <QLineF>
 #include <QMap>
 #include <QMapIterator>
 #include <QMenu>
@@ -2929,6 +2931,123 @@ T2DMap::MapInteractionContext T2DMap::buildInteractionContext(QMouseEvent* event
     return context;
 }
 
+void T2DMap::updateCursorForHover(const MapInteractionContext& context)
+{
+    if (!context.event || context.event->type() != QEvent::MouseMove) {
+        return;
+    }
+
+    if (context.buttons != Qt::NoButton) {
+        return;
+    }
+
+    if (mpMap && (mpMap->mLeftDown || mpMap->m2DPanMode)) {
+        return;
+    }
+
+    const bool hoveringInteractiveElement = isHoveringRoom(context)
+        || isHoveringLabel(context)
+        || isHoveringCustomLine(context);
+
+    const Qt::CursorShape currentShape = cursor().shape();
+
+    if (hoveringInteractiveElement) {
+        if (currentShape != Qt::PointingHandCursor) {
+            setCursor(Qt::PointingHandCursor);
+        }
+        return;
+    }
+
+    if (currentShape == Qt::PointingHandCursor) {
+        unsetCursor();
+    }
+}
+
+bool T2DMap::isHoveringRoom(const MapInteractionContext& context) const
+{
+    if (!context.area || !mpMap || !mpMap->mpRoomDB) {
+        return false;
+    }
+
+    return roomIdAtWidgetPosition(context.widgetPosition, context.area).has_value();
+}
+
+bool T2DMap::isHoveringLabel(const MapInteractionContext& context) const
+{
+    if (!context.area) {
+        return false;
+    }
+
+    const auto& labels = context.area->mMapLabels;
+    if (labels.isEmpty()) {
+        return false;
+    }
+
+    QMapIterator<int, TMapLabel> iterator(labels);
+    while (iterator.hasNext()) {
+        iterator.next();
+        const auto& mapLabel = iterator.value();
+        if (qRound(mapLabel.pos.z()) != mMapCenterZ) {
+            continue;
+        }
+
+        const qreal labelX = mapLabel.pos.x() * static_cast<qreal>(mRoomWidth) + static_cast<qreal>(mRX);
+        const qreal labelY = mapLabel.pos.y() * -static_cast<qreal>(mRoomHeight) + static_cast<qreal>(mRY);
+        const QRectF boundingRect(labelX, labelY, mapLabel.clickSize.width(), mapLabel.clickSize.height());
+        if (boundingRect.contains(context.widgetPosition)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool T2DMap::isHoveringCustomLine(const MapInteractionContext& context) const
+{
+    if (!context.area || !mpMap || !mpMap->mpRoomDB) {
+        return false;
+    }
+
+    const QPointF& clickPoint = context.mapPoint;
+    constexpr qreal pointHandleRadius = 0.25;
+    constexpr qreal segmentDistanceThreshold = 0.1;
+
+    QSetIterator<int> roomIterator(context.area->rooms);
+    while (roomIterator.hasNext()) {
+        const int roomId = roomIterator.next();
+        TRoom* room = mpMap->mpRoomDB->getRoom(roomId);
+        if (!room || room->customLines.isEmpty() || room->z() != mMapCenterZ) {
+            continue;
+        }
+
+        QMapIterator<QString, QList<QPointF>> lineIterator(room->customLines);
+        while (lineIterator.hasNext()) {
+            lineIterator.next();
+            const QList<QPointF>& points = lineIterator.value();
+            if (points.isEmpty()) {
+                continue;
+            }
+
+            QPointF previousPoint(static_cast<qreal>(room->x()), static_cast<qreal>(room->y()));
+            for (const QPointF& point : points) {
+                if (qAbs(context.mapX - point.x()) <= pointHandleRadius
+                    && qAbs(context.mapY - point.y()) <= pointHandleRadius) {
+                    return true;
+                }
+
+                const QLineF segment(previousPoint, point);
+                if (!qFuzzyIsNull(segment.length()) && segment.distanceToPoint(clickPoint) <= segmentDistanceThreshold) {
+                    return true;
+                }
+
+                previousPoint = point;
+            }
+        }
+    }
+
+    return false;
+}
+
 void T2DMap::updateSelectionWidget()
 {
     // display room selection list widget if more than 1 room has been selected
@@ -4051,6 +4170,7 @@ void T2DMap::mouseMoveEvent(QMouseEvent* event)
     }
 
     auto context = buildInteractionContext(event);
+    updateCursorForHover(context);
     mInteractionDispatcher.dispatch(context);
 }
 
