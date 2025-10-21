@@ -51,6 +51,7 @@
 #include <QUiLoader>
 #include <QKeySequenceEdit>
 #include <QHBoxLayout>
+#include <QMessageBox>
 #include "../3rdparty/kdtoolbox/singleshot_connect/singleshot_connect.h"
 #include "post_guard.h"
 
@@ -1301,17 +1302,38 @@ void dlgProfilePreferences::initWithHost(Host* pHost)
         gridLayout_groupBox_shortcuts->addWidget(new QLabel(mudlet::self()->mpShortcutsManager->getLabel(key)), floor(shortcutsRow / 2), (shortcutsRow % 2) * 2 + 1);
         gridLayout_groupBox_shortcuts->addWidget(sequenceEdit, floor(shortcutsRow / 2), (shortcutsRow % 2) * 2 + 2);
         shortcutsRow++;
-        connect(sequenceEdit, &QKeySequenceEdit::editingFinished, this, [=]() {
-            QKeySequence* newSequence = nullptr;
-            if (sequenceEdit->keySequence().isEmpty()
-                    || sequenceEdit->keySequence().matches(QKeySequence(Qt::Key_Escape))) {
-                newSequence = new QKeySequence();
+        connect(sequenceEdit, &QKeySequenceEdit::editingFinished, this, [=, this]() {
+            const QKeySequence editedSequence = sequenceEdit->keySequence();
+            QKeySequence candidateSequence;
+            if (editedSequence.isEmpty() || editedSequence.matches(QKeySequence(Qt::Key_Escape))) {
+                candidateSequence = QKeySequence();
             } else {
-                newSequence = new QKeySequence(sequenceEdit->keySequence());
+                candidateSequence = editedSequence;
             }
-            sequenceEdit->setKeySequence(*newSequence);
-            sequence->swap(*newSequence);
-            delete newSequence;
+
+            if (!candidateSequence.isEmpty()) {
+                const auto iteratorEnd = currentShortcuts.cend();
+                for (auto iterator = currentShortcuts.cbegin(); iterator != iteratorEnd; ++iterator) {
+                    if (iterator.key() == key) {
+                        continue;
+                    }
+                    if (*iterator.value() == candidateSequence) {
+                        sequenceEdit->setKeySequence(*sequence);
+                        const QString conflictingActionLabel = mudlet::self()->mpShortcutsManager->getLabel(iterator.key());
+                        const QString conflictingShortcutText = candidateSequence.toString(QKeySequence::NativeText);
+                        //: Message shown when the user tries to assign a shortcut that is already used by another action.
+                        QMessageBox::warning(this,
+                                             tr("Duplicate shortcut"),
+                                             tr("The shortcut %1 is already assigned to \"%2\". Please choose a different shortcut.")
+                                                     .arg(conflictingShortcutText, conflictingActionLabel));
+                        return;
+                    }
+                }
+            }
+
+            QKeySequence newSequence = candidateSequence;
+            sequenceEdit->setKeySequence(newSequence);
+            sequence->swap(newSequence);
         });
         connect(this, &dlgProfilePreferences::signal_resetMainWindowShortcutsToDefaults, sequenceEdit, [=]() {
             sequenceEdit->setKeySequence(*mudlet::self()->mpShortcutsManager->getDefault(key));
