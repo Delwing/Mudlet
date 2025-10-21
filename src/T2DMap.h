@@ -33,6 +33,7 @@
 #include <QFont>
 #include <QFutureWatcher>
 #include <QPixmap>
+#include <QVector>
 #include <QPointer>
 #include <QPointF>
 #include <QString>
@@ -91,6 +92,7 @@ public:
     friend class LabelInteractionHandler;
     friend class RoomMoveActivationHandler;
     friend class RoomContextMenuHandler;
+    friend class RoomExitCreationHandler;
     friend class RoomMoveDragHandler;
     friend class SelectionRectangleHandler;
 
@@ -349,6 +351,7 @@ private:
     std::unique_ptr<IInteractionHandler> mCustomLineEditContextMenuHandler;
     std::unique_ptr<IInteractionHandler> mCustomLineEditInteractionHandler;
     std::unique_ptr<IInteractionHandler> mRoomContextMenuHandler;
+    std::unique_ptr<IInteractionHandler> mRoomExitCreationHandler;
     std::unique_ptr<IInteractionHandler> mRoomMoveActivationHandler;
     std::unique_ptr<IInteractionHandler> mRoomMoveDragHandler;
     std::unique_ptr<IInteractionHandler> mSelectionRectangleInteractionHandler;
@@ -368,6 +371,25 @@ private:
     void initiateSpeedWalk(const int speedWalkStartRoomId, const int speedWalkTargetRoomId);
     inline void drawDoor(QPainter&, const TRoom&, const QString&, const QLineF&);
     void updateMapLabel(QRectF labelRectangle, int labelId, TArea* pArea);
+
+    struct ExitHandleData
+    {
+        int direction = 0;
+        QPointF position;
+    };
+
+    void updateExitHandleHover(const QPointF& widgetPosition, const TArea* area);
+    void resetExitHandleHover();
+    bool beginExitLinkDrag(const QPointF& widgetPosition, const QPointF& mapPoint);
+    void updateExitLinkDrag(const QPointF& widgetPosition, const QPointF& mapPoint);
+    void endExitLinkDrag();
+    void drawExitCreationOverlay(QPainter& painter, const TArea& area);
+    void drawExitLinkPreview(QPainter& painter);
+    void drawExitHandlesForRoom(QPainter& painter, const TRoom& room, const TArea& area, const QMap<int, QColor>& highlightColors, bool drawBaseHandles) const;
+    QVector<ExitHandleData> buildExitHandlePositions(const QPointF& center, const QSizeF& halfSize) const;
+    bool calculateRoomVisualGeometry(const TRoom& room, const TArea& area, QPointF& center, QSizeF& halfSize) const;
+    qreal computeExitHandleRadius(const QSizeF& halfSize) const;
+    void clearExitLinkState();
 
     bool mDialogLock = false;
     struct ClickPosition {
@@ -401,6 +423,17 @@ private:
     dlgRoomProperties* mpDlgRoomProperties = nullptr;
     dlgMapLabel* mpDlgMapLabel = nullptr;
     // Track the area last viewed so we can raise an event when it changes,
+
+    int mHoveredRoomId = 0;
+    int mHoveredExitDirection = 0;
+    bool mExitLinkDragActive = false;
+    int mExitLinkStartRoomId = 0;
+    int mExitLinkStartDirection = 0;
+    int mExitLinkStartRoomAreaId = 0;
+    int mExitLinkStartRoomZ = 0;
+    int mExitLinkTargetRoomId = 0;
+    int mExitLinkTargetDirection = 0;
+    QPointF mExitLinkCurrentPosition;
     // initialised to an invalid area that is different to the one that mAreaID
     // is initialised to - so that the xyzoom gets read for the first area that
     // is shown - because the value of these two are different:

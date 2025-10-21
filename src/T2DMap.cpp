@@ -37,6 +37,7 @@
 #include "LabelInteractionHandler.h"
 #include "PanInteractionHandler.h"
 #include "RoomContextMenuHandler.h"
+#include "RoomExitCreationHandler.h"
 #include "RoomMoveActivationHandler.h"
 #include "RoomMoveDragHandler.h"
 #include "SelectionRectangleHandler.h"
@@ -366,6 +367,9 @@ T2DMap::T2DMap(QWidget* parent)
     mRoomContextMenuHandler = std::make_unique<RoomContextMenuHandler>(*this);
     registerInteractionHandler(mRoomContextMenuHandler.get(), 340);
 
+    mRoomExitCreationHandler = std::make_unique<RoomExitCreationHandler>(*this);
+    registerInteractionHandler(mRoomExitCreationHandler.get(), 320);
+
     mRoomMoveActivationHandler = std::make_unique<RoomMoveActivationHandler>(*this);
     registerInteractionHandler(mRoomMoveActivationHandler.get(), 300);
 
@@ -380,6 +384,8 @@ T2DMap::T2DMap(QWidget* parent)
 
     mPanInteractionHandler = std::make_unique<PanInteractionHandler>(*this);
     registerInteractionHandler(mPanInteractionHandler.get(), 100);
+
+    setMouseTracking(true);
 }
 
 void T2DMap::init()
@@ -454,6 +460,9 @@ void T2DMap::switchArea(const QString& newAreaName)
     if (!pHost || !mpMap) {
         return;
     }
+
+    resetExitHandleHover();
+    clearExitLinkState();
 
     const int playerRoomId = mpMap->mRoomIdHash.value(mpMap->mProfileName);
     TRoom* pPlayerRoom = mpMap->mpRoomDB->getRoom(playerRoomId);
@@ -1818,6 +1827,8 @@ void T2DMap::paintEvent(QPaintEvent* e)
         painter.restore();
     }
 
+    drawExitCreationOverlay(painter, *pDrawnArea);
+
     // Draw the ("foreground") labels that are on the top of the map:
     itMapLabel.toFront();
     while (itMapLabel.hasNext()) {
@@ -2811,6 +2822,438 @@ void T2DMap::updateMapLabel(QRectF labelRectangle, int labelId, TArea* pArea)
     }
 }
 
+void T2DMap::updateExitHandleHover(const QPointF& widgetPosition, const TArea* area)
+{
+    if (mExitLinkDragActive) {
+        return;
+    }
+
+    const int previousRoomId = mHoveredRoomId;
+    const int previousDirection = mHoveredExitDirection;
+
+    int newRoomId = 0;
+    int newDirection = 0;
+
+    if (!mMapViewOnly && mpMap && mpMap->mpRoomDB && area) {
+        const auto roomId = roomIdAtWidgetPosition(widgetPosition.toPoint(), area);
+        if (roomId.has_value()) {
+            if (TRoom* room = mpMap->mpRoomDB->getRoom(roomId.value())) {
+                if (TArea* roomArea = mpMap->mpRoomDB->getArea(room->getArea())) {
+                    QPointF center;
+                    QSizeF halfSize;
+                    if (calculateRoomVisualGeometry(*room, *roomArea, center, halfSize)) {
+                        const auto handles = buildExitHandlePositions(center, halfSize);
+                        const qreal radius = computeExitHandleRadius(halfSize);
+                        const qreal radiusSquared = radius * radius;
+
+                        for (const auto& handle : handles) {
+                            const QPointF delta = handle.position - widgetPosition;
+                            const qreal distanceSquared = QPointF::dotProduct(delta, delta);
+                            if (distanceSquared <= radiusSquared) {
+                                newDirection = handle.direction;
+                                break;
+                            }
+                        }
+
+                        newRoomId = room->getId();
+                    }
+                }
+            }
+        }
+    }
+
+    mHoveredRoomId = newRoomId;
+    mHoveredExitDirection = newDirection;
+
+    if (previousRoomId != mHoveredRoomId || previousDirection != mHoveredExitDirection) {
+        update();
+    }
+}
+
+void T2DMap::resetExitHandleHover()
+{
+    if (mHoveredRoomId != 0 || mHoveredExitDirection != 0) {
+        mHoveredRoomId = 0;
+        mHoveredExitDirection = 0;
+        update();
+    }
+}
+
+bool T2DMap::beginExitLinkDrag(const QPointF& widgetPosition, const QPointF& mapPoint)
+{
+    if (mMapViewOnly || mExitLinkDragActive || !mpMap || !mpMap->mpRoomDB) {
+        return false;
+    }
+
+    const int startRoomId = mHoveredRoomId;
+    const int startDirection = mHoveredExitDirection;
+
+    if (startRoomId <= 0 || startDirection <= 0) {
+        return false;
+    }
+
+    TRoom* room = mpMap->mpRoomDB->getRoom(startRoomId);
+    if (!room) {
+        return false;
+    }
+
+    TArea* roomArea = mpMap->mpRoomDB->getArea(room->getArea());
+    if (!roomArea) {
+        return false;
+    }
+
+    QPointF center;
+    QSizeF halfSize;
+    if (!calculateRoomVisualGeometry(*room, *roomArea, center, halfSize)) {
+        return false;
+    }
+
+    mExitLinkDragActive = true;
+    mExitLinkStartRoomId = startRoomId;
+    mExitLinkStartDirection = startDirection;
+    mExitLinkStartRoomAreaId = room->getArea();
+    mExitLinkStartRoomZ = room->z();
+    mExitLinkCurrentPosition = widgetPosition;
+    mExitLinkTargetRoomId = 0;
+    mExitLinkTargetDirection = 0;
+
+    updateExitLinkDrag(widgetPosition, mapPoint);
+
+    return true;
+}
+
+void T2DMap::updateExitLinkDrag(const QPointF& widgetPosition, const QPointF& mapPoint)
+{
+    if (!mExitLinkDragActive) {
+        return;
+    }
+
+    mExitLinkCurrentPosition = widgetPosition;
+
+    if (!mpMap || !mpMap->mpRoomDB) {
+        mExitLinkTargetRoomId = 0;
+        mExitLinkTargetDirection = 0;
+        update();
+        return;
+    }
+
+    TArea* area = mpMap->mpRoomDB->getArea(mExitLinkStartRoomAreaId);
+    if (!area) {
+        mExitLinkTargetRoomId = 0;
+        mExitLinkTargetDirection = 0;
+        update();
+        return;
+    }
+
+    const int candidateX = qRound(mapPoint.x());
+    const int candidateY = qRound(mapPoint.y());
+    const int candidateZ = mExitLinkStartRoomZ;
+
+    int newTargetRoomId = 0;
+    if (!area->getAreaRooms().isEmpty()) {
+        const QList<int> roomsAtPosition = area->getRoomsByPosition(candidateX, candidateY, candidateZ);
+        for (int roomId : roomsAtPosition) {
+            if (roomId == mExitLinkStartRoomId) {
+                continue;
+            }
+            newTargetRoomId = roomId;
+            break;
+        }
+    }
+
+    int newTargetDirection = 0;
+    if (newTargetRoomId > 0) {
+        const int reverseDirection = TMap::scmReverseDirections.value(mExitLinkStartDirection, DIR_OTHER);
+        if (reverseDirection >= DIR_NORTH && reverseDirection <= DIR_OUT) {
+            newTargetDirection = reverseDirection;
+        }
+    }
+
+    mExitLinkTargetRoomId = newTargetRoomId;
+    mExitLinkTargetDirection = newTargetDirection;
+
+    update();
+}
+
+void T2DMap::endExitLinkDrag()
+{
+    if (!mExitLinkDragActive) {
+        return;
+    }
+
+    if (mpMap && mExitLinkTargetRoomId > 0 && mExitLinkStartRoomId > 0 && mExitLinkStartDirection > 0) {
+        mpMap->setExit(mExitLinkStartRoomId, mExitLinkTargetRoomId, mExitLinkStartDirection);
+
+        const int reverseDirection = TMap::scmReverseDirections.value(mExitLinkStartDirection, DIR_OTHER);
+        if (reverseDirection >= DIR_NORTH && reverseDirection <= DIR_OUT) {
+            mpMap->setExit(mExitLinkTargetRoomId, mExitLinkStartRoomId, reverseDirection);
+        }
+    }
+
+    clearExitLinkState();
+    update();
+}
+
+void T2DMap::drawExitCreationOverlay(QPainter& painter, const TArea& area)
+{
+    if (mMapViewOnly || mpHost.isNull() || !mpMap || !mpMap->mpRoomDB) {
+        return;
+    }
+
+    if (mHoveredRoomId > 0 && !mpMap->mpRoomDB->getRoom(mHoveredRoomId)) {
+        resetExitHandleHover();
+    }
+
+    if (mExitLinkStartRoomId > 0 && !mpMap->mpRoomDB->getRoom(mExitLinkStartRoomId)) {
+        clearExitLinkState();
+    }
+
+    if (mExitLinkTargetRoomId > 0 && !mpMap->mpRoomDB->getRoom(mExitLinkTargetRoomId)) {
+        mExitLinkTargetRoomId = 0;
+        mExitLinkTargetDirection = 0;
+    }
+
+    if (mExitLinkDragActive) {
+        drawExitLinkPreview(painter);
+    }
+
+    auto drawHandles = [&](int roomId, const QMap<int, QColor>& highlights, bool drawBase) {
+        if (roomId <= 0) {
+            return;
+        }
+        TRoom* room = mpMap->mpRoomDB->getRoom(roomId);
+        if (!room || room->getArea() != mAreaID) {
+            return;
+        }
+        TArea* roomArea = mpMap->mpRoomDB->getArea(room->getArea());
+        if (!roomArea) {
+            return;
+        }
+        drawExitHandlesForRoom(painter, *room, *roomArea, highlights, drawBase);
+    };
+
+    if (mExitLinkDragActive) {
+        QMap<int, QColor> startHighlights;
+        if (mExitLinkStartDirection > 0) {
+            QColor startColor = mpHost->mLightGreen_2;
+            startColor.setAlpha(230);
+            startHighlights.insert(mExitLinkStartDirection, startColor);
+        }
+        drawHandles(mExitLinkStartRoomId, startHighlights, true);
+
+        QMap<int, QColor> targetHighlights;
+        if (mExitLinkTargetDirection > 0) {
+            QColor targetColor = mpHost->mLightBlue_2;
+            targetColor.setAlpha(230);
+            targetHighlights.insert(mExitLinkTargetDirection, targetColor);
+        }
+        drawHandles(mExitLinkTargetRoomId, targetHighlights, true);
+    } else {
+        QMap<int, QColor> hoverHighlights;
+        if (mHoveredExitDirection > 0) {
+            QColor hoverColor = mpHost->mLightBlue_2;
+            hoverColor.setAlpha(230);
+            hoverHighlights.insert(mHoveredExitDirection, hoverColor);
+        }
+        drawHandles(mHoveredRoomId, hoverHighlights, true);
+    }
+}
+
+void T2DMap::drawExitLinkPreview(QPainter& painter)
+{
+    if (!mExitLinkDragActive || mpHost.isNull() || !mpMap || !mpMap->mpRoomDB) {
+        return;
+    }
+
+    TRoom* startRoom = mpMap->mpRoomDB->getRoom(mExitLinkStartRoomId);
+    if (!startRoom) {
+        return;
+    }
+
+    TArea* startArea = mpMap->mpRoomDB->getArea(startRoom->getArea());
+    if (!startArea) {
+        return;
+    }
+
+    QPointF startCenter;
+    QSizeF startHalfSize;
+    if (!calculateRoomVisualGeometry(*startRoom, *startArea, startCenter, startHalfSize)) {
+        return;
+    }
+
+    const auto startHandles = buildExitHandlePositions(startCenter, startHalfSize);
+    QPointF startPoint = startCenter;
+    for (const auto& handle : startHandles) {
+        if (handle.direction == mExitLinkStartDirection) {
+            startPoint = handle.position;
+            break;
+        }
+    }
+
+    QPointF endPoint = mExitLinkCurrentPosition;
+
+    if (mExitLinkTargetRoomId > 0) {
+        if (TRoom* targetRoom = mpMap->mpRoomDB->getRoom(mExitLinkTargetRoomId)) {
+            if (TArea* targetArea = mpMap->mpRoomDB->getArea(targetRoom->getArea())) {
+                QPointF targetCenter;
+                QSizeF targetHalfSize;
+                if (calculateRoomVisualGeometry(*targetRoom, *targetArea, targetCenter, targetHalfSize)) {
+                    if (mExitLinkTargetDirection > 0) {
+                        const auto targetHandles = buildExitHandlePositions(targetCenter, targetHalfSize);
+                        for (const auto& handle : targetHandles) {
+                            if (handle.direction == mExitLinkTargetDirection) {
+                                endPoint = handle.position;
+                                break;
+                            }
+                        }
+                    } else {
+                        endPoint = targetCenter;
+                    }
+                }
+            }
+        }
+    }
+
+    QPen previewPen(mpHost->mLightBlue_2);
+    previewPen.setWidthF(qBound<qreal>(1.5, static_cast<qreal>(mRoomWidth) * 0.1, 4.0));
+    previewPen.setCapStyle(Qt::RoundCap);
+    previewPen.setJoinStyle(Qt::RoundJoin);
+    previewPen.setCosmetic(true);
+
+    painter.save();
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setPen(previewPen);
+    painter.drawLine(startPoint, endPoint);
+    painter.restore();
+}
+
+void T2DMap::drawExitHandlesForRoom(QPainter& painter, const TRoom& room, const TArea& area, const QMap<int, QColor>& highlightColors, bool drawBaseHandles) const
+{
+    if (mpHost.isNull()) {
+        return;
+    }
+
+    QPointF center;
+    QSizeF halfSize;
+    if (!calculateRoomVisualGeometry(room, area, center, halfSize)) {
+        return;
+    }
+
+    const auto handles = buildExitHandlePositions(center, halfSize);
+    if (handles.isEmpty()) {
+        return;
+    }
+
+    const qreal baseRadius = computeExitHandleRadius(halfSize);
+    if (baseRadius <= 0.0) {
+        return;
+    }
+
+    QColor baseFill = mpHost->mRoomBorderColor;
+    baseFill.setAlpha(180);
+    QColor baseOutline = baseFill.darker(150);
+    baseOutline.setAlpha(220);
+
+    painter.save();
+    painter.setRenderHint(QPainter::Antialiasing, true);
+
+    for (const auto& handle : handles) {
+        QColor fillColor = baseFill;
+        QColor outlineColor = baseOutline;
+        qreal radius = baseRadius;
+
+        if (highlightColors.contains(handle.direction)) {
+            QColor highlightColor = highlightColors.value(handle.direction);
+            if (!highlightColor.isValid()) {
+                highlightColor = baseFill;
+            }
+            fillColor = highlightColor;
+            QColor highlightOutline = highlightColor.darker(150);
+            highlightOutline.setAlpha(255);
+            outlineColor = highlightOutline;
+            radius *= 1.2;
+        } else if (!drawBaseHandles) {
+            continue;
+        }
+
+        QRectF ellipse(handle.position.x() - radius,
+                       handle.position.y() - radius,
+                       radius * 2.0,
+                       radius * 2.0);
+
+        painter.setPen(QPen(outlineColor, 1.0));
+        painter.setBrush(fillColor);
+        painter.drawEllipse(ellipse);
+    }
+
+    painter.restore();
+}
+
+QVector<T2DMap::ExitHandleData> T2DMap::buildExitHandlePositions(const QPointF& center, const QSizeF& halfSize) const
+{
+    QVector<ExitHandleData> handles;
+    handles.reserve(8);
+
+    const qreal halfWidth = halfSize.width();
+    const qreal halfHeight = halfSize.height();
+
+    handles.append({DIR_NORTH, QPointF(center.x(), center.y() - halfHeight)});
+    handles.append({DIR_SOUTH, QPointF(center.x(), center.y() + halfHeight)});
+    handles.append({DIR_EAST, QPointF(center.x() + halfWidth, center.y())});
+    handles.append({DIR_WEST, QPointF(center.x() - halfWidth, center.y())});
+    handles.append({DIR_NORTHEAST, QPointF(center.x() + halfWidth, center.y() - halfHeight)});
+    handles.append({DIR_NORTHWEST, QPointF(center.x() - halfWidth, center.y() - halfHeight)});
+    handles.append({DIR_SOUTHEAST, QPointF(center.x() + halfWidth, center.y() + halfHeight)});
+    handles.append({DIR_SOUTHWEST, QPointF(center.x() - halfWidth, center.y() + halfHeight)});
+
+    return handles;
+}
+
+bool T2DMap::calculateRoomVisualGeometry(const TRoom& room, const TArea& area, QPointF& center, QSizeF& halfSize) const
+{
+    const float fx = ((xspan / 2.0f) - mMapCenterX) * mRoomWidth;
+    const float fy = ((yspan / 2.0f) - mMapCenterY) * mRoomHeight;
+
+    const float rx = static_cast<float>(room.x()) * mRoomWidth + fx;
+    const float ry = static_cast<float>(room.y()) * -1 * mRoomHeight + fy;
+
+    center = QPointF(rx, ry);
+
+    qreal width = area.gridMode ? static_cast<qreal>(mRoomWidth) : static_cast<qreal>(mRoomWidth) * rSize;
+    qreal height = area.gridMode ? static_cast<qreal>(mRoomHeight) : static_cast<qreal>(mRoomHeight) * rSize;
+
+    if (mBubbleMode) {
+        const qreal diameter = static_cast<qreal>(mRoomWidth) * rSize;
+        width = diameter;
+        height = diameter;
+    }
+
+    halfSize = QSizeF(width / 2.0, height / 2.0);
+    return halfSize.width() > 0.0 && halfSize.height() > 0.0;
+}
+
+qreal T2DMap::computeExitHandleRadius(const QSizeF& halfSize) const
+{
+    const qreal minDimension = qMin(halfSize.width(), halfSize.height());
+    if (qFuzzyIsNull(minDimension)) {
+        return 0.0;
+    }
+
+    return qBound<qreal>(4.0, minDimension * 0.6, 12.0);
+}
+
+void T2DMap::clearExitLinkState()
+{
+    mExitLinkDragActive = false;
+    mExitLinkStartRoomId = 0;
+    mExitLinkStartDirection = 0;
+    mExitLinkStartRoomAreaId = 0;
+    mExitLinkStartRoomZ = 0;
+    mExitLinkTargetRoomId = 0;
+    mExitLinkTargetDirection = 0;
+    mExitLinkCurrentPosition = QPointF();
+}
+
 void T2DMap::mouseReleaseEvent(QMouseEvent* event)
 {
     if (!mpMap) {
@@ -3342,6 +3785,8 @@ void T2DMap::slot_toggleMapViewOnly()
         mapModeEvent.mArgumentTypeList.append(ARGUMENT_TYPE_STRING);
         mpHost->raiseEvent(mapModeEvent);
 
+        resetExitHandleHover();
+        clearExitLinkState();
         update();
     }
 }
