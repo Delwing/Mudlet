@@ -135,6 +135,34 @@ std::optional<int> T2DMap::roomIdAtWidgetPosition(const QPoint& widgetPosition, 
     return std::nullopt;
 }
 
+bool T2DMap::hasLabelAtWidgetPosition(const QPoint& widgetPosition, const TArea* area) const
+{
+    if (!area) {
+        return false;
+    }
+
+    QMapIterator<int, TMapLabel> iterator(area->mMapLabels);
+    while (iterator.hasNext()) {
+        iterator.next();
+        const auto& mapLabel = iterator.value();
+        if (mapLabel.pos.z() != mMapCenterZ) {
+            continue;
+        }
+
+        const QRectF boundingRect(
+            mapLabel.pos.x() * mRoomWidth + mRX,
+            mapLabel.pos.y() * mRoomHeight * -1 + mRY,
+            mapLabel.clickSize.width(),
+            mapLabel.clickSize.height());
+
+        if (boundingRect.contains(widgetPosition)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 void T2DMap::prepareSingleClickSelection(MapInteractionContext& context)
 {
     mMultiRect = QRect(context.widgetPosition, context.widgetPosition);
@@ -280,37 +308,64 @@ bool T2DMap::InteractionDispatcher::dispatch(MapInteractionContext& context) con
 
 bool T2DMap::eventFilter(QObject* watched, QEvent* event)
 {
-    if (mActiveContextMenu && event && event->type() == QEvent::MouseButtonPress) {
-        auto* mouseEvent = static_cast<QMouseEvent*>(event);
-        if (mouseEvent && mouseEvent->button() == Qt::RightButton) {
-            const QPoint globalPos = mouseEvent->globalPosition().toPoint();
-            const QPoint localPos = mapFromGlobal(globalPos);
-
-            if (rect().contains(localPos)) {
-                auto menu = mActiveContextMenu;
-                mActiveContextMenu.clear();
-
-                if (menu) {
-                    menu->close();
-                }
-
-                const QPointF localPosF(localPos);
-                const QPointF globalPosF(globalPos);
-
-                auto* pressEvent = new QMouseEvent(QEvent::MouseButtonPress, localPosF, localPosF, globalPosF,
-                    Qt::RightButton, Qt::RightButton, mouseEvent->modifiers());
-                auto* releaseEvent = new QMouseEvent(QEvent::MouseButtonRelease, localPosF, localPosF, globalPosF,
-                    Qt::RightButton, Qt::NoButton, mouseEvent->modifiers());
-
-                QCoreApplication::postEvent(this, pressEvent);
-                QCoreApplication::postEvent(this, releaseEvent);
-
-                return true;
-            }
-        }
+    if (!mActiveContextMenu || !event || event->type() != QEvent::MouseButtonPress) {
+        return QObject::eventFilter(watched, event);
     }
 
-    return QObject::eventFilter(watched, event);
+    auto* mouseEvent = static_cast<QMouseEvent*>(event);
+    if (!mouseEvent) {
+        return QObject::eventFilter(watched, event);
+    }
+
+    const QPoint globalPos = mouseEvent->globalPosition().toPoint();
+    const QPoint localPos = mapFromGlobal(globalPos);
+
+    if (!rect().contains(localPos)) {
+        return QObject::eventFilter(watched, event);
+    }
+
+    auto menu = mActiveContextMenu;
+    mActiveContextMenu.clear();
+    mPopupMenu = false;
+
+    if (menu) {
+        menu->close();
+    }
+
+    const QPointF localPosF(localPos);
+    const QPointF globalPosF(globalPos);
+
+    if (mouseEvent->button() == Qt::RightButton) {
+        auto* pressEvent = new QMouseEvent(QEvent::MouseButtonPress, localPosF, localPosF, globalPosF,
+            Qt::RightButton, Qt::RightButton, mouseEvent->modifiers());
+        auto* releaseEvent = new QMouseEvent(QEvent::MouseButtonRelease, localPosF, localPosF, globalPosF,
+            Qt::RightButton, Qt::NoButton, mouseEvent->modifiers());
+
+        QCoreApplication::postEvent(this, pressEvent);
+        QCoreApplication::postEvent(this, releaseEvent);
+
+        return true;
+    }
+
+    if (mouseEvent->button() == Qt::LeftButton) {
+        const TArea* area = (mpMap && mpMap->mpRoomDB) ? mpMap->mpRoomDB->getArea(mAreaID) : nullptr;
+        bool hasInteractiveItem = false;
+
+        if (area) {
+            hasInteractiveItem = roomIdAtWidgetPosition(localPos, area).has_value()
+                || hasLabelAtWidgetPosition(localPos, area);
+        }
+
+        if (hasInteractiveItem) {
+            auto* pressEvent = new QMouseEvent(QEvent::MouseButtonPress, localPosF, localPosF, globalPosF,
+                Qt::LeftButton, Qt::LeftButton, mouseEvent->modifiers());
+            QCoreApplication::postEvent(this, pressEvent);
+        }
+
+        return true;
+    }
+
+    return true;
 }
 
 const QString& key_icon_dialog_ok_apply = qsl(":/icons/dialog-ok-apply.png");
