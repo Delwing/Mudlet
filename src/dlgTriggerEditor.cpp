@@ -361,8 +361,12 @@ dlgTriggerEditor::dlgTriggerEditor(Host* pH)
     // And the edbee widget
     mpSourceEditorEdbee = mpSourceEditorArea->edbeeEditorWidget;
     mpSourceEditorArea->widget_triggerTest->setEnabled(false);
-    connect(mpSourceEditorArea->pushButton_triggerTest, &QAbstractButton::clicked, this, &dlgTriggerEditor::slot_triggerTestRequested);
-    connect(mpSourceEditorArea->lineEdit_triggerTestInput, &QLineEdit::returnPressed, this, &dlgTriggerEditor::slot_triggerTestRequested);
+    if (auto* triggerInput = mpSourceEditorArea->lineEdit_triggerTestInput) {
+        connect(triggerInput, &QLineEdit::returnPressed, this, &dlgTriggerEditor::slot_triggerTestRequested);
+        connect(triggerInput, &QLineEdit::textChanged, this, [this]() {
+            slot_triggerTestRequested();
+        });
+    }
     mpSourceEditorEdbee->setAutoScrollMargin(20);
     mpSourceEditorEdbee->setPlaceholderText(tr("-- add your Lua code here"));
     mpSourceEditorEdbeeDocument = mpSourceEditorEdbee->textDocument();
@@ -6438,6 +6442,12 @@ void dlgTriggerEditor::resetTriggerTestFeedback()
         resultLabel->clear();
         resultLabel->setStyleSheet(QString());
         resultLabel->setToolTip(QString());
+    }
+
+    if (mpSourceEditorArea->widget_triggerTest && mpSourceEditorArea->widget_triggerTest->isEnabled()) {
+        if (auto* input = mpSourceEditorArea->lineEdit_triggerTestInput; input && !input->text().isEmpty()) {
+            slot_triggerTestRequested();
+        }
     }
 }
 
