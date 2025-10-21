@@ -50,6 +50,7 @@
 #include <QTableWidget>
 #include <QToolBar>
 #include <QUiLoader>
+#include <QKeyCombination>
 #include <QKeySequenceEdit>
 #include <QHBoxLayout>
 #include <QLocale>
@@ -4678,6 +4679,8 @@ void dlgProfilePreferences::updateShortcutWarnings()
 
     listWidget_shortcutWarnings->clear();
 
+    KeyUnit* keyUnit = mpHost ? mpHost->getKeyUnit() : nullptr;
+
     const auto makeSequenceKey = [](const QKeySequence& sequence) -> QString {
         if (sequence.isEmpty()) {
             return QString();
@@ -4686,13 +4689,45 @@ void dlgProfilePreferences::updateShortcutWarnings()
         QStringList parts;
         const int combinationCount = sequence.count();
         for (int index = 0; index < combinationCount; ++index) {
-            const int combination = sequence[index];
-            if (combination == 0) {
+            const QKeyCombination combination = sequence[index];
+            if (!combination.isValid()) {
                 break;
             }
-            parts.append(QString::number(combination));
+            parts.append(QString::number(combination.toCombined()));
         }
         return parts.join(u',');
+    };
+
+    const auto describeSequence = [&](const QKeySequence& sequence) -> QString {
+        if (sequence.isEmpty()) {
+            return QString();
+        }
+
+        QStringList combinationTexts;
+        const int combinationCount = sequence.count();
+        for (int index = 0; index < combinationCount; ++index) {
+            const QKeyCombination combination = sequence[index];
+            if (!combination.isValid()) {
+                break;
+            }
+
+            QString combinationText;
+            if (keyUnit) {
+                combinationText = keyUnit->getKeyName(combination.key(), combination.keyboardModifiers());
+            }
+            if (combinationText.isEmpty()) {
+                combinationText = QKeySequence(combination).toString(QKeySequence::NativeText);
+            }
+            combinationTexts.append(combinationText);
+        }
+
+        if (combinationTexts.isEmpty()) {
+            return sequence.toString(QKeySequence::NativeText);
+        }
+
+        //: Separates multiple key combinations in a shortcut description.
+        const QString separator = tr(", then ");
+        return combinationTexts.join(separator);
     };
 
     QMap<QString, QStringList> sequenceAssignments;
@@ -4726,16 +4761,14 @@ void dlgProfilePreferences::updateShortcutWarnings()
             continue;
         }
 
-        const QString sequenceText = sequenceLookup.value(iterator.key()).toString(QKeySequence::NativeText);
+        const QString sequenceText = describeSequence(sequenceLookup.value(iterator.key()));
         const QString actionList = QLocale().createSeparatedList(iterator.value());
         //: Warning shown when multiple actions share the same shortcut.
         warnings.append(tr("Shortcut %1 is assigned to multiple actions: %2.").arg(sequenceText, actionList));
     }
 
-    if (mpHost) {
-        KeyUnit* keyUnit = mpHost->getKeyUnit();
-        if (keyUnit) {
-            QMap<QString, QStringList> tkeyAssignments;
+    if (keyUnit) {
+        QMap<QString, QStringList> tkeyAssignments;
 
             const auto collectKeyBindings = [&](auto&& collect, TKey* key) -> void {
                 if (!key) {
@@ -4752,7 +4785,7 @@ void dlgProfilePreferences::updateShortcutWarnings()
                     return;
                 }
 
-                if (!key->state() || !key->shouldBeActive() || !key->ancestorsActive() || key->isTemporary()) {
+                if (!key->state() || !key->shouldBeActive() || !key->ancestorsActive()) {
                     if (children) {
                         for (TKey* child : *children) {
                             collect(collect, child);
@@ -4789,19 +4822,17 @@ void dlgProfilePreferences::updateShortcutWarnings()
                 collectKeyBindings(collectKeyBindings, key);
             }
 
-            for (auto iterator = sequenceAssignments.cbegin(); iterator != sequenceAssignments.cend(); ++iterator) {
-                const QString sequenceKey = iterator.key();
-                if (!tkeyAssignments.contains(sequenceKey)) {
-                    continue;
-                }
-
-                const QString sequenceText = sequenceLookup.value(sequenceKey).toString(QKeySequence::NativeText);
-                const QString actionList = QLocale().createSeparatedList(iterator.value());
-                const QString keyList = QLocale().createSeparatedList(tkeyAssignments.value(sequenceKey));
-                //: Warning shown when a shortcut also matches a TKey binding.
-                warnings.append(tr("Shortcut %1 assigned to %2 conflicts with key binding(s): %3.")
-                                    .arg(sequenceText, actionList, keyList));
+        for (auto iterator = sequenceAssignments.cbegin(); iterator != sequenceAssignments.cend(); ++iterator) {
+            const QString sequenceKey = iterator.key();
+            if (!tkeyAssignments.contains(sequenceKey)) {
+                continue;
             }
+
+            const QString actionList = QLocale().createSeparatedList(iterator.value());
+            const QString keyList = QLocale().createSeparatedList(tkeyAssignments.value(sequenceKey));
+            //: Warning shown when a shortcut also matches a TKey binding.
+            warnings.append(tr("Shortcut %1 assigned to %2 conflicts with key binding(s): %3.")
+                                .arg(describeSequence(sequenceLookup.value(sequenceKey)), actionList, keyList));
         }
     }
 
