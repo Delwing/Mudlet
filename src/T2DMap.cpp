@@ -63,6 +63,7 @@
 #include <QStandardPaths>
 #include <QtEvents>
 #include <QtUiTools>
+#include <limits>
 #include "post_guard.h"
 
 #include "mapInfoContributorManager.h"
@@ -2951,8 +2952,73 @@ void T2DMap::updateExitLinkDrag(const QPointF& widgetPosition, const QPointF& ma
     const int candidateY = qRound(mapPoint.y());
     const int candidateZ = mExitLinkStartRoomZ;
 
+    const int reverseDirection = TMap::scmReverseDirections.value(mExitLinkStartDirection, DIR_OTHER);
+
     int newTargetRoomId = 0;
-    if (!area->getAreaRooms().isEmpty()) {
+    int newTargetDirection = 0;
+
+    if (reverseDirection >= DIR_NORTH && reverseDirection <= DIR_OUT) {
+        qreal bestDistanceSquared = std::numeric_limits<qreal>::max();
+        const qreal detectionScale = 1.35;
+
+        for (int dx = -1; dx <= 1; ++dx) {
+            for (int dy = -1; dy <= 1; ++dy) {
+                const QList<int> roomsAtPosition = area->getRoomsByPosition(candidateX + dx, candidateY + dy, candidateZ);
+                for (int roomId : roomsAtPosition) {
+                    if (roomId == mExitLinkStartRoomId) {
+                        continue;
+                    }
+
+                    TRoom* candidateRoom = mpMap->mpRoomDB->getRoom(roomId);
+                    if (!candidateRoom) {
+                        continue;
+                    }
+
+                    QPointF center;
+                    QSizeF halfSize;
+                    if (!calculateRoomVisualGeometry(*candidateRoom, *area, center, halfSize)) {
+                        continue;
+                    }
+
+                    const auto handles = buildExitHandlePositions(center, halfSize);
+                    if (handles.isEmpty()) {
+                        continue;
+                    }
+
+                    const qreal baseRadius = computeExitHandleRadius(halfSize);
+                    if (baseRadius <= 0.0) {
+                        continue;
+                    }
+
+                    const qreal detectionRadius = baseRadius * detectionScale;
+                    const qreal detectionRadiusSquared = detectionRadius * detectionRadius;
+
+                    for (const auto& handle : handles) {
+                        if (handle.direction != reverseDirection) {
+                            continue;
+                        }
+
+                        const QPointF delta = handle.position - widgetPosition;
+                        const qreal distanceSquared = QPointF::dotProduct(delta, delta);
+                        if (distanceSquared > detectionRadiusSquared) {
+                            continue;
+                        }
+
+                        if (distanceSquared < bestDistanceSquared) {
+                            bestDistanceSquared = distanceSquared;
+                            newTargetRoomId = roomId;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (newTargetRoomId > 0) {
+            newTargetDirection = reverseDirection;
+        }
+    }
+
+    if (newTargetRoomId <= 0 && !area->getAreaRooms().isEmpty()) {
         const QList<int> roomsAtPosition = area->getRoomsByPosition(candidateX, candidateY, candidateZ);
         for (int roomId : roomsAtPosition) {
             if (roomId == mExitLinkStartRoomId) {
@@ -2961,12 +3027,8 @@ void T2DMap::updateExitLinkDrag(const QPointF& widgetPosition, const QPointF& ma
             newTargetRoomId = roomId;
             break;
         }
-    }
 
-    int newTargetDirection = 0;
-    if (newTargetRoomId > 0) {
-        const int reverseDirection = TMap::scmReverseDirections.value(mExitLinkStartDirection, DIR_OTHER);
-        if (reverseDirection >= DIR_NORTH && reverseDirection <= DIR_OUT) {
+        if (newTargetRoomId > 0 && reverseDirection >= DIR_NORTH && reverseDirection <= DIR_OUT) {
             newTargetDirection = reverseDirection;
         }
     }
