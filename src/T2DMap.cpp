@@ -360,6 +360,10 @@ bool T2DMap::eventFilter(QObject* watched, QEvent* event)
             auto* pressEvent = new QMouseEvent(QEvent::MouseButtonPress, localPosF, localPosF, globalPosF,
                 Qt::LeftButton, Qt::LeftButton, mouseEvent->modifiers());
             QCoreApplication::postEvent(this, pressEvent);
+
+            auto* releaseEvent = new QMouseEvent(QEvent::MouseButtonRelease, localPosF, localPosF, globalPosF,
+                Qt::LeftButton, Qt::NoButton, mouseEvent->modifiers());
+            QCoreApplication::postEvent(this, releaseEvent);
         }
 
         return true;
