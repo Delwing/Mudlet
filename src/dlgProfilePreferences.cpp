@@ -36,6 +36,7 @@
 #include "dlgTriggerEditor.h"
 #include "edbee/views/texteditorscrollarea.h"
 #include "edbee/models/textdocumentscopes.h"
+#include "KeyUnit.h"
 
 #include "pre_guard.h"
 #include <chrono>
@@ -51,7 +52,9 @@
 #include <QUiLoader>
 #include <QKeySequenceEdit>
 #include <QHBoxLayout>
-#include <QMessageBox>
+#include <QLocale>
+#include <QListWidgetItem>
+#include <QStringList>
 #include "../3rdparty/kdtoolbox/singleshot_connect/singleshot_connect.h"
 #include "post_guard.h"
 
@@ -1311,38 +1314,21 @@ void dlgProfilePreferences::initWithHost(Host* pHost)
                 candidateSequence = editedSequence;
             }
 
-            if (!candidateSequence.isEmpty()) {
-                const auto iteratorEnd = currentShortcuts.cend();
-                for (auto iterator = currentShortcuts.cbegin(); iterator != iteratorEnd; ++iterator) {
-                    if (iterator.key() == key) {
-                        continue;
-                    }
-                    if (*iterator.value() == candidateSequence) {
-                        sequenceEdit->setKeySequence(*sequence);
-                        const QString conflictingActionLabel = mudlet::self()->mpShortcutsManager->getLabel(iterator.key());
-                        const QString conflictingShortcutText = candidateSequence.toString(QKeySequence::NativeText);
-                        //: Message shown when the user tries to assign a shortcut that is already used by another action.
-                        QMessageBox::warning(this,
-                                             tr("Duplicate shortcut"),
-                                             tr("The shortcut %1 is already assigned to \"%2\". Please choose a different shortcut.")
-                                                     .arg(conflictingShortcutText, conflictingActionLabel));
-                        return;
-                    }
-                }
-            }
-
             QKeySequence newSequence = candidateSequence;
             sequenceEdit->setKeySequence(newSequence);
             sequence->swap(newSequence);
+            updateShortcutWarnings();
         });
         connect(this, &dlgProfilePreferences::signal_resetMainWindowShortcutsToDefaults, sequenceEdit, [=]() {
             sequenceEdit->setKeySequence(*mudlet::self()->mpShortcutsManager->getDefault(key));
             QKeySequence* newSequence = new QKeySequence(*mudlet::self()->mpShortcutsManager->getDefault(key));
             sequence->swap(*newSequence);
             delete newSequence;
+            updateShortcutWarnings();
         });
     }
 
+    updateShortcutWarnings();
 }
 
 void dlgProfilePreferences::disconnectHostRelatedControls()
@@ -4682,6 +4668,129 @@ bool dlgProfilePreferences::updateDisplayFont()
     config->endChanges();
 
     return true;
+}
+
+void dlgProfilePreferences::updateShortcutWarnings()
+{
+    if (!label_shortcutWarnings || !listWidget_shortcutWarnings) {
+        return;
+    }
+
+    listWidget_shortcutWarnings->clear();
+
+    QMap<QString, QStringList> sequenceAssignments;
+    QMap<QString, QKeySequence> sequenceLookup;
+
+    const auto iteratorEnd = currentShortcuts.cend();
+    for (auto iterator = currentShortcuts.cbegin(); iterator != iteratorEnd; ++iterator) {
+        const QKeySequence* sequencePointer = iterator.value();
+        if (!sequencePointer) {
+            continue;
+        }
+
+        const QKeySequence sequence = *sequencePointer;
+        if (sequence.isEmpty()) {
+            continue;
+        }
+
+        const QString portableText = sequence.toString(QKeySequence::PortableText);
+        sequenceAssignments[portableText].append(mudlet::self()->mpShortcutsManager->getLabel(iterator.key()));
+        sequenceLookup.insert(portableText, sequence);
+    }
+
+    QStringList warnings;
+
+    for (auto iterator = sequenceAssignments.cbegin(); iterator != sequenceAssignments.cend(); ++iterator) {
+        if (iterator.value().size() < 2) {
+            continue;
+        }
+
+        const QString sequenceText = sequenceLookup.value(iterator.key()).toString(QKeySequence::NativeText);
+        const QString actionList = QLocale().createSeparatedList(iterator.value());
+        //: Warning shown when multiple actions share the same shortcut.
+        warnings.append(tr("Shortcut %1 is assigned to multiple actions: %2.").arg(sequenceText, actionList));
+    }
+
+    if (mpHost) {
+        KeyUnit* keyUnit = mpHost->getKeyUnit();
+        if (keyUnit) {
+            QMap<QString, QStringList> tkeyAssignments;
+
+            const auto collectKeyBindings = [&](auto&& collect, TKey* key) -> void {
+                if (!key) {
+                    return;
+                }
+
+                auto* children = key->getChildrenList();
+                if (key->isFolder()) {
+                    if (children) {
+                        for (TKey* child : *children) {
+                            collect(collect, child);
+                        }
+                    }
+                    return;
+                }
+
+                if (!key->state() || !key->shouldBeActive() || !key->ancestorsActive() || key->isTemporary()) {
+                    if (children) {
+                        for (TKey* child : *children) {
+                            collect(collect, child);
+                        }
+                    }
+                    return;
+                }
+
+                const Qt::Key keyCode = key->getKeyCode();
+                if (keyCode != Qt::Key_unknown) {
+                    const Qt::KeyboardModifiers modifiers = key->getKeyModifiers();
+                    const QKeySequence sequence(static_cast<int>(modifiers) | keyCode);
+                    if (!sequence.isEmpty()) {
+                        const QString portableText = sequence.toString(QKeySequence::PortableText);
+                        QString bindingDisplay = key->getName();
+                        const QString bindingName = keyUnit->getKeyName(keyCode, modifiers);
+                        if (!bindingName.isEmpty()) {
+                            //: Shows the TKey binding name and its resolved shortcut text.
+                            bindingDisplay = tr("%1 (%2)").arg(bindingDisplay, bindingName);
+                        }
+                        tkeyAssignments[portableText].append(bindingDisplay);
+                    }
+                }
+
+                if (children) {
+                    for (TKey* child : *children) {
+                        collect(collect, child);
+                    }
+                }
+            };
+
+            const auto rootNodes = keyUnit->getKeyRootNodeList();
+            for (TKey* key : rootNodes) {
+                collectKeyBindings(collectKeyBindings, key);
+            }
+
+            for (auto iterator = sequenceAssignments.cbegin(); iterator != sequenceAssignments.cend(); ++iterator) {
+                const QString portableText = iterator.key();
+                if (!tkeyAssignments.contains(portableText)) {
+                    continue;
+                }
+
+                const QString sequenceText = sequenceLookup.value(portableText).toString(QKeySequence::NativeText);
+                const QString actionList = QLocale().createSeparatedList(iterator.value());
+                const QString keyList = QLocale().createSeparatedList(tkeyAssignments.value(portableText));
+                //: Warning shown when a shortcut also matches a TKey binding.
+                warnings.append(tr("Shortcut %1 assigned to %2 conflicts with key binding(s): %3.")
+                                    .arg(sequenceText, actionList, keyList));
+            }
+        }
+    }
+
+    label_shortcutWarnings->setVisible(!warnings.isEmpty());
+    listWidget_shortcutWarnings->setVisible(!warnings.isEmpty());
+
+    for (const QString& warning : warnings) {
+        auto* item = new QListWidgetItem(warning, listWidget_shortcutWarnings);
+        item->setFlags(Qt::ItemIsEnabled);
+    }
 }
 
 void dlgProfilePreferences::cancelShortcutCaptures()

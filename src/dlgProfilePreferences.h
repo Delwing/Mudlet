@@ -217,6 +217,7 @@ private:
     void fillOutMapHistory();
     bool updateDisplayFont();
     void cancelShortcutCaptures();
+    void updateShortcutWarnings();
 
 
     QPointer<Host> mpHost;
