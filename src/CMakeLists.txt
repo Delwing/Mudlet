@@ -115,6 +115,7 @@ set(mudlet_SRCS
     LabelInteractionHandler.cpp
     PanInteractionHandler.cpp
     RoomContextMenuHandler.cpp
+    RoomExitCreationHandler.cpp
     RoomMoveActivationHandler.cpp
     RoomMoveDragHandler.cpp
     SelectionRectangleHandler.cpp
