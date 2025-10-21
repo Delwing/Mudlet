@@ -51,14 +51,18 @@
 
 #include "pre_guard.h"
 #include <QCheckBox>
+#include <QByteArray>
 #include <QColorDialog>
 #include <QFileDialog>
+#include <QLineEdit>
 #include <QMessageBox>
 #include <QScrollBar>
 #include <QShortcut>
 #include <QShowEvent>
 #include <QToolBar>
 #include "post_guard.h"
+
+#include <pcre.h>
 
 using namespace std::chrono_literals;
 
@@ -356,6 +360,9 @@ dlgTriggerEditor::dlgTriggerEditor(Host* pH)
 
     // And the edbee widget
     mpSourceEditorEdbee = mpSourceEditorArea->edbeeEditorWidget;
+    mpSourceEditorArea->widget_triggerTest->setEnabled(false);
+    connect(mpSourceEditorArea->pushButton_triggerTest, &QAbstractButton::clicked, this, &dlgTriggerEditor::slot_triggerTestRequested);
+    connect(mpSourceEditorArea->lineEdit_triggerTestInput, &QLineEdit::returnPressed, this, &dlgTriggerEditor::slot_triggerTestRequested);
     mpSourceEditorEdbee->setAutoScrollMargin(20);
     mpSourceEditorEdbee->setPlaceholderText(tr("-- add your Lua code here"));
     mpSourceEditorEdbeeDocument = mpSourceEditorEdbee->textDocument();
@@ -6315,6 +6322,7 @@ void dlgTriggerEditor::setupPatternControls(const int type, dlgTriggerPatternEdi
     }
 
     checkForMoreThanOneTriggerItem();
+    resetTriggerTestFeedback();
 }
 
 void dlgTriggerEditor::slot_changedPattern()
@@ -6329,6 +6337,7 @@ void dlgTriggerEditor::slot_changedPattern()
     }
 
     checkForMoreThanOneTriggerItem();
+    resetTriggerTestFeedback();
 }
 
 // This can get called after the lineEdit contents has changed and it is now a
@@ -6415,10 +6424,192 @@ void dlgTriggerEditor::slot_setupPatternControls(int type)
             pPatternItem->singleLineTextEdit_pattern->clear();
         }
     }
+
+    resetTriggerTestFeedback();
+}
+
+void dlgTriggerEditor::resetTriggerTestFeedback()
+{
+    if (!mpSourceEditorArea) {
+        return;
+    }
+
+    if (auto* resultLabel = mpSourceEditorArea->label_triggerTestResult) {
+        resultLabel->clear();
+        resultLabel->setStyleSheet(QString());
+        resultLabel->setToolTip(QString());
+    }
+}
+
+void dlgTriggerEditor::slot_triggerTestRequested()
+{
+    if (mCurrentView != EditorViewType::cmTriggerView || !mpSourceEditorArea) {
+        return;
+    }
+
+    auto* input = mpSourceEditorArea->lineEdit_triggerTestInput;
+    auto* resultLabel = mpSourceEditorArea->label_triggerTestResult;
+    if (!input || !resultLabel || !mpSourceEditorArea->widget_triggerTest->isEnabled()) {
+        return;
+    }
+
+    resultLabel->setToolTip(QString());
+
+    const QString sampleLine = input->text();
+    if (sampleLine.isEmpty()) {
+        resultLabel->setText(tr("Enter text to test"));
+        resultLabel->setStyleSheet(qsl("color: #b26b00; font-weight: bold;"));
+        return;
+    }
+
+    const QByteArray sampleUtf8 = sampleLine.toUtf8();
+    const int sampleLength = sampleUtf8.length();
+
+    bool matchFound = false;
+    int testedPatterns = 0;
+    int skippedUnsupported = 0;
+    QString compileError;
+    int errorPatternIndex = -1;
+
+    constexpr int cMaxCaptureGroups = 33;
+    int ovector[cMaxCaptureGroups * 3];
+
+    for (int i = 0; i < mTriggerPatternEdit.size(); ++i) {
+        auto* patternItem = mTriggerPatternEdit.at(i);
+        if (!patternItem) {
+            continue;
+        }
+
+        const int patternType = patternItem->comboBox_patternType->currentIndex();
+        const QString patternText = patternItem->singleLineTextEdit_pattern->toPlainText();
+
+        switch (patternType) {
+        case REGEX_SUBSTRING: {
+            if (patternText.isEmpty()) {
+                continue;
+            }
+            testedPatterns++;
+            if (sampleLine.contains(patternText)) {
+                matchFound = true;
+            }
+            break;
+        }
+        case REGEX_PERL: {
+            if (patternText.isEmpty()) {
+                continue;
+            }
+            testedPatterns++;
+            const QByteArray patternUtf8 = patternText.toUtf8();
+            const char* errorMessage = nullptr;
+            int errorOffset = 0;
+            pcre* expression = pcre_compile(patternUtf8.constData(), PCRE_UTF8 | PCRE_UCP, &errorMessage, &errorOffset, nullptr);
+            if (!expression) {
+                compileError = tr("Pattern %1 failed to compile at offset %2: %3")
+                                   .arg(QString::number(i + 1), QString::number(errorOffset), QString::fromUtf8(errorMessage));
+                errorPatternIndex = i;
+                break;
+            }
+            const int result = pcre_exec(expression, nullptr, sampleUtf8.constData(), sampleLength, 0, 0, ovector, cMaxCaptureGroups * 3);
+            pcre_free(expression);
+            if (result >= 0) {
+                matchFound = true;
+            }
+            break;
+        }
+        case REGEX_BEGIN_OF_LINE_SUBSTRING: {
+            if (patternText.isEmpty()) {
+                continue;
+            }
+            testedPatterns++;
+            if (sampleLine.startsWith(patternText)) {
+                matchFound = true;
+            }
+            break;
+        }
+        case REGEX_EXACT_MATCH: {
+            if (patternText.isEmpty()) {
+                continue;
+            }
+            testedPatterns++;
+            if (sampleLine == patternText) {
+                matchFound = true;
+            }
+            break;
+        }
+        case REGEX_LUA_CODE:
+            if (!patternText.isEmpty()) {
+                skippedUnsupported++;
+            }
+            break;
+        case REGEX_LINE_SPACER:
+            if (patternItem->spinBox_lineSpacer->value() > 0) {
+                skippedUnsupported++;
+            }
+            break;
+        case REGEX_COLOR_PATTERN:
+            if (!patternText.isEmpty()) {
+                skippedUnsupported++;
+            }
+            break;
+        case REGEX_PROMPT:
+            skippedUnsupported++;
+            break;
+        default:
+            break;
+        }
+
+        if (!compileError.isEmpty() || matchFound) {
+            break;
+        }
+    }
+
+    if (!compileError.isEmpty()) {
+        if (errorPatternIndex >= 0) {
+            resultLabel->setText(tr("Pattern %1 error").arg(QString::number(errorPatternIndex + 1)));
+        } else {
+            resultLabel->setText(tr("Pattern error"));
+        }
+        resultLabel->setStyleSheet(qsl("color: #b00020; font-weight: bold;"));
+        resultLabel->setToolTip(compileError);
+        return;
+    }
+
+    QString skippedTooltip;
+    if (skippedUnsupported > 0) {
+        skippedTooltip = tr("%n unsupported pattern(s) skipped", "", skippedUnsupported);
+    }
+
+    if (testedPatterns == 0) {
+        if (skippedUnsupported > 0) {
+            resultLabel->setText(tr("No testable patterns"));
+            resultLabel->setStyleSheet(qsl("color: #b26b00; font-weight: bold;"));
+            resultLabel->setToolTip(skippedTooltip);
+        } else {
+            resultLabel->setText(tr("No patterns to test"));
+            resultLabel->setStyleSheet(qsl("color: #b26b00; font-weight: bold;"));
+            resultLabel->setToolTip(QString());
+        }
+        return;
+    }
+
+    if (matchFound) {
+        resultLabel->setText(tr("✓ OK"));
+        resultLabel->setStyleSheet(qsl("color: #2e7d32; font-weight: bold;"));
+        resultLabel->setToolTip(skippedTooltip);
+    } else {
+        resultLabel->setText(tr("No match"));
+        resultLabel->setStyleSheet(qsl("color: #b00020; font-weight: bold;"));
+        resultLabel->setToolTip(skippedTooltip);
+    }
 }
 
 void dlgTriggerEditor::slot_triggerSelected(QTreeWidgetItem* pItem)
 {
+    if (mpSourceEditorArea && mpSourceEditorArea->widget_triggerTest) {
+        mpSourceEditorArea->widget_triggerTest->setEnabled(pItem != nullptr);
+        resetTriggerTestFeedback();
+    }
+
     if (!pItem) {
         return;
     }
@@ -8387,6 +8578,15 @@ void dlgTriggerEditor::changeView(EditorViewType view)
     mpVarsMainArea->setVisible(view == EditorViewType::cmVarsView);
     treeWidget_variables->setVisible(view == EditorViewType::cmVarsView);
     checkBox_displayAllVariables->setVisible(view == EditorViewType::cmVarsView);
+
+    if (mpSourceEditorArea && mpSourceEditorArea->widget_triggerTest) {
+        const bool showTriggerTester = view == EditorViewType::cmTriggerView;
+        mpSourceEditorArea->widget_triggerTest->setVisible(showTriggerTester);
+        mpSourceEditorArea->widget_triggerTest->setEnabled(showTriggerTester && mpCurrentTriggerItem);
+        if (!showTriggerTester) {
+            resetTriggerTestFeedback();
+        }
+    }
 
     mpExportAction->setEnabled(view != EditorViewType::cmVarsView);
 
@@ -11388,6 +11588,10 @@ void dlgTriggerEditor::clearTriggerForm()
 {
     mpTriggersMainArea->hide();
     mpSourceEditorArea->hide();
+    if (mpSourceEditorArea && mpSourceEditorArea->widget_triggerTest) {
+        mpSourceEditorArea->widget_triggerTest->setEnabled(false);
+        resetTriggerTestFeedback();
+    }
     if (mCurrentView != EditorViewType::cmUnknownView) {
         showIntro();
     }
