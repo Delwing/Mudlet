@@ -56,6 +56,7 @@
 #include <QLocale>
 #include <QListWidgetItem>
 #include <QStringList>
+#include <QSet>
 #include "../3rdparty/kdtoolbox/singleshot_connect/singleshot_connect.h"
 #include "post_guard.h"
 
@@ -4732,6 +4733,26 @@ void dlgProfilePreferences::updateShortcutWarnings()
 
     QMap<QString, QStringList> sequenceAssignments;
     QMap<QString, QKeySequence> sequenceLookup;
+    QMap<QString, QStringList> unsupportedSequenceCombinations;
+
+    const QSet<Qt::Key> unsupportedKeys = []() {
+        QSet<Qt::Key> keys;
+        for (int digit = 0; digit <= 9; ++digit) {
+            keys.insert(static_cast<Qt::Key>(Qt::Key_0 + digit));
+        }
+        for (int letter = 0; letter < 26; ++letter) {
+            keys.insert(static_cast<Qt::Key>(Qt::Key_A + letter));
+        }
+        keys.insert(Qt::Key_Minus);
+        keys.insert(Qt::Key_Equal);
+        keys.insert(Qt::Key_Delete);
+        keys.insert(Qt::Key_Insert);
+        keys.insert(Qt::Key_Home);
+        keys.insert(Qt::Key_End);
+        keys.insert(Qt::Key_PageUp);
+        keys.insert(Qt::Key_PageDown);
+        return keys;
+    }();
 
     const auto iteratorEnd = currentShortcuts.cend();
     for (auto iterator = currentShortcuts.cbegin(); iterator != iteratorEnd; ++iterator) {
@@ -4752,6 +4773,39 @@ void dlgProfilePreferences::updateShortcutWarnings()
 
         sequenceAssignments[sequenceKey].append(mudlet::self()->mpShortcutsManager->getLabel(iterator.key()));
         sequenceLookup.insert(sequenceKey, sequence);
+
+        QStringList unsupportedCombinations;
+        const int combinationCount = sequence.count();
+        for (int index = 0; index < combinationCount; ++index) {
+            const QKeyCombination combination = sequence[index];
+            if (!combination.isValid()) {
+                break;
+            }
+
+            if (combination.keyboardModifiers() != Qt::NoModifier) {
+                continue;
+            }
+
+            const Qt::Key key = combination.key();
+            if (!unsupportedKeys.contains(key)) {
+                continue;
+            }
+
+            QString combinationText;
+            if (keyUnit) {
+                combinationText = keyUnit->getKeyName(key, combination.keyboardModifiers());
+            }
+            if (combinationText.isEmpty()) {
+                combinationText = QKeySequence(combination).toString(QKeySequence::NativeText);
+            }
+            if (!combinationText.isEmpty()) {
+                unsupportedCombinations.append(combinationText);
+            }
+        }
+
+        if (!unsupportedCombinations.isEmpty()) {
+            unsupportedSequenceCombinations.insert(sequenceKey, unsupportedCombinations);
+        }
     }
 
     QStringList warnings;
@@ -4767,8 +4821,23 @@ void dlgProfilePreferences::updateShortcutWarnings()
         warnings.append(tr("Shortcut %1 is assigned to multiple actions: %2.").arg(sequenceText, actionList));
     }
 
+    for (auto iterator = unsupportedSequenceCombinations.cbegin(); iterator != unsupportedSequenceCombinations.cend(); ++iterator) {
+        const QString sequenceKey = iterator.key();
+        const auto actionIterator = sequenceAssignments.constFind(sequenceKey);
+        if (actionIterator == sequenceAssignments.cend()) {
+            continue;
+        }
+
+        const QString actionList = QLocale().createSeparatedList(actionIterator.value());
+        const QString combinationList = QLocale().createSeparatedList(iterator.value());
+        //: Warning shown when a shortcut uses keys without modifiers that Mudlet cannot detect.
+        warnings.append(tr("Shortcut %1 assigned to %2 uses %3 without modifiers; these shortcuts will not work.")
+                            .arg(describeSequence(sequenceLookup.value(sequenceKey)), actionList, combinationList));
+    }
+
     if (keyUnit) {
         QMap<QString, QStringList> tkeyAssignments;
+        QMap<QString, QStringList> tempTkeyAssignments;
 
             const auto collectKeyBindings = [&](auto&& collect, TKey* key) -> void {
                 if (!key) {
@@ -4806,7 +4875,11 @@ void dlgProfilePreferences::updateShortcutWarnings()
                             //: Shows the TKey binding name and its resolved shortcut text.
                             bindingDisplay = tr("%1 (%2)").arg(bindingDisplay, bindingName);
                         }
-                        tkeyAssignments[sequenceKey].append(bindingDisplay);
+                        if (key->isTemporary()) {
+                            tempTkeyAssignments[sequenceKey].append(bindingDisplay);
+                        } else {
+                            tkeyAssignments[sequenceKey].append(bindingDisplay);
+                        }
                     }
                 }
 
@@ -4824,15 +4897,21 @@ void dlgProfilePreferences::updateShortcutWarnings()
 
         for (auto iterator = sequenceAssignments.cbegin(); iterator != sequenceAssignments.cend(); ++iterator) {
             const QString sequenceKey = iterator.key();
-            if (!tkeyAssignments.contains(sequenceKey)) {
-                continue;
+            if (tkeyAssignments.contains(sequenceKey)) {
+                const QString actionList = QLocale().createSeparatedList(iterator.value());
+                const QString keyList = QLocale().createSeparatedList(tkeyAssignments.value(sequenceKey));
+                //: Warning shown when a shortcut also matches a permanent key binding.
+                warnings.append(tr("Shortcut %1 assigned to %2 conflicts with key binding(s): %3.")
+                                    .arg(describeSequence(sequenceLookup.value(sequenceKey)), actionList, keyList));
             }
 
-            const QString actionList = QLocale().createSeparatedList(iterator.value());
-            const QString keyList = QLocale().createSeparatedList(tkeyAssignments.value(sequenceKey));
-            //: Warning shown when a shortcut also matches a TKey binding.
-            warnings.append(tr("Shortcut %1 assigned to %2 conflicts with key binding(s): %3.")
-                                .arg(describeSequence(sequenceLookup.value(sequenceKey)), actionList, keyList));
+            if (tempTkeyAssignments.contains(sequenceKey)) {
+                const QString actionList = QLocale().createSeparatedList(iterator.value());
+                const QString keyList = QLocale().createSeparatedList(tempTkeyAssignments.value(sequenceKey));
+                //: Warning shown when a shortcut also matches a script tempKey binding.
+                warnings.append(tr("Shortcut %1 assigned to %2 conflicts with tempKey binding(s) registered by scripts: %3.")
+                                    .arg(describeSequence(sequenceLookup.value(sequenceKey)), actionList, keyList));
+            }
         }
     }
 
