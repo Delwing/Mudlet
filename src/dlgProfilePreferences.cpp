@@ -4678,6 +4678,23 @@ void dlgProfilePreferences::updateShortcutWarnings()
 
     listWidget_shortcutWarnings->clear();
 
+    const auto makeSequenceKey = [](const QKeySequence& sequence) -> QString {
+        if (sequence.isEmpty()) {
+            return QString();
+        }
+
+        QStringList parts;
+        const int combinationCount = sequence.count();
+        for (int index = 0; index < combinationCount; ++index) {
+            const int combination = sequence[index];
+            if (combination == 0) {
+                break;
+            }
+            parts.append(QString::number(combination));
+        }
+        return parts.join(u',');
+    };
+
     QMap<QString, QStringList> sequenceAssignments;
     QMap<QString, QKeySequence> sequenceLookup;
 
@@ -4693,9 +4710,13 @@ void dlgProfilePreferences::updateShortcutWarnings()
             continue;
         }
 
-        const QString portableText = sequence.toString(QKeySequence::PortableText);
-        sequenceAssignments[portableText].append(mudlet::self()->mpShortcutsManager->getLabel(iterator.key()));
-        sequenceLookup.insert(portableText, sequence);
+        const QString sequenceKey = makeSequenceKey(sequence);
+        if (sequenceKey.isEmpty()) {
+            continue;
+        }
+
+        sequenceAssignments[sequenceKey].append(mudlet::self()->mpShortcutsManager->getLabel(iterator.key()));
+        sequenceLookup.insert(sequenceKey, sequence);
     }
 
     QStringList warnings;
@@ -4744,15 +4765,15 @@ void dlgProfilePreferences::updateShortcutWarnings()
                 if (keyCode != Qt::Key_unknown) {
                     const Qt::KeyboardModifiers modifiers = key->getKeyModifiers();
                     const QKeySequence sequence(static_cast<int>(modifiers) | keyCode);
-                    if (!sequence.isEmpty()) {
-                        const QString portableText = sequence.toString(QKeySequence::PortableText);
+                    const QString sequenceKey = makeSequenceKey(sequence);
+                    if (!sequenceKey.isEmpty()) {
                         QString bindingDisplay = key->getName();
                         const QString bindingName = keyUnit->getKeyName(keyCode, modifiers);
                         if (!bindingName.isEmpty()) {
                             //: Shows the TKey binding name and its resolved shortcut text.
                             bindingDisplay = tr("%1 (%2)").arg(bindingDisplay, bindingName);
                         }
-                        tkeyAssignments[portableText].append(bindingDisplay);
+                        tkeyAssignments[sequenceKey].append(bindingDisplay);
                     }
                 }
 
@@ -4769,14 +4790,14 @@ void dlgProfilePreferences::updateShortcutWarnings()
             }
 
             for (auto iterator = sequenceAssignments.cbegin(); iterator != sequenceAssignments.cend(); ++iterator) {
-                const QString portableText = iterator.key();
-                if (!tkeyAssignments.contains(portableText)) {
+                const QString sequenceKey = iterator.key();
+                if (!tkeyAssignments.contains(sequenceKey)) {
                     continue;
                 }
 
-                const QString sequenceText = sequenceLookup.value(portableText).toString(QKeySequence::NativeText);
+                const QString sequenceText = sequenceLookup.value(sequenceKey).toString(QKeySequence::NativeText);
                 const QString actionList = QLocale().createSeparatedList(iterator.value());
-                const QString keyList = QLocale().createSeparatedList(tkeyAssignments.value(portableText));
+                const QString keyList = QLocale().createSeparatedList(tkeyAssignments.value(sequenceKey));
                 //: Warning shown when a shortcut also matches a TKey binding.
                 warnings.append(tr("Shortcut %1 assigned to %2 conflicts with key binding(s): %3.")
                                     .arg(sequenceText, actionList, keyList));
