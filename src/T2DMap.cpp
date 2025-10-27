@@ -65,6 +65,8 @@
 
 #include <cmath>
 
+#include <cmath>
+
 #include "mapInfoContributorManager.h"
 
 
