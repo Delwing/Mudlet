@@ -54,4 +54,7 @@ dlgSourceEditorArea::dlgSourceEditorArea(QWidget* pParentWidget)
 
     // disable shadows as their purpose (notify there is more text) is performed by scrollbars already
     edbeeEditorWidget->textScrollArea()->enableShadowWidget(false);
+
+    widget_triggerTest->hide();
+    label_triggerTestResult->clear();
 }

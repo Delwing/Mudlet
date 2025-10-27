@@ -224,6 +224,7 @@ public:
     void delete_variable();
     void setSearchOptions(const SearchOptions);
     void setEditorShowBidi(const bool);
+    void resetTriggerTestFeedback();
     void showCurrentTriggerItem();
     void hideSystemMessageArea();
     void showIDLabels(const bool);
@@ -301,6 +302,7 @@ public slots:
     void slot_editorThemeChanged();
 
 private slots:
+    void slot_triggerTestRequested();
     void slot_changeEditorTextOptions(QTextOption::Flags);
     void slot_toggleIsPushDownButton(int);
     void slot_toggleSearchCaseSensitivity(bool);
