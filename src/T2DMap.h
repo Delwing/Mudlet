@@ -364,6 +364,10 @@ private:
     std::unique_ptr<IInteractionHandler> mPanInteractionHandler;
 
     MapInteractionContext buildInteractionContext(QMouseEvent* event);
+    void updateCursorForHover(const MapInteractionContext& context);
+    bool isHoveringRoom(const MapInteractionContext& context) const;
+    bool isHoveringLabel(const MapInteractionContext& context) const;
+    bool isHoveringCustomLine(const MapInteractionContext& context) const;
 
     void updateSelectionWidget();
     void resizeMultiSelectionWidget();
