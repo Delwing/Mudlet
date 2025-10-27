@@ -60,6 +60,7 @@
 #include <QMapIterator>
 #include <QMenu>
 #include <QStandardPaths>
+#include <QTimer>
 #include <QtEvents>
 #include <QtUiTools>
 
@@ -158,6 +159,10 @@ void T2DMap::prepareSingleClickSelection(MapInteractionContext& context)
     context.hasClickedRoom = clickedRoomId.has_value();
     context.clickedRoomId = clickedRoomId.value_or(0);
 
+    if (context.hasClickedRoom && context.button != Qt::RightButton) {
+        cancelContextMenuSelectionRestore();
+    }
+
     if (context.button == Qt::RightButton) {
         return;
     }
@@ -254,12 +259,82 @@ void T2DMap::registerContextMenu(QMenu* menu)
     mActiveContextMenu = menu;
 
     QObject::connect(menu, &QMenu::aboutToHide, this, [this]() {
-        mActiveContextMenu.clear();
+        onContextMenuClosed();
     });
 
     QObject::connect(menu, &QObject::destroyed, this, [this]() {
-        mActiveContextMenu.clear();
+        onContextMenuClosed();
     });
+}
+
+void T2DMap::onContextMenuClosed()
+{
+    mActiveContextMenu.clear();
+
+    if (!mRestoreSelectionAfterContextMenu) {
+        clearContextMenuSelectionRestoreState();
+        return;
+    }
+
+    if (mContextMenuRestoreQueued) {
+        return;
+    }
+
+    mContextMenuRestoreQueued = true;
+
+    QTimer::singleShot(0, this, [this]() {
+        restoreSelectionAfterContextMenu();
+    });
+}
+
+void T2DMap::restoreSelectionAfterContextMenu()
+{
+    mContextMenuRestoreQueued = false;
+
+    if (!mRestoreSelectionAfterContextMenu || mCancelContextMenuSelectionRestore) {
+        clearContextMenuSelectionRestoreState();
+        return;
+    }
+
+    mMultiSelectionSet = mStoredSelectionBeforeContextMenu;
+    mMultiSelection = mStoredMultiSelectionStateBeforeContextMenu;
+    mMultiSelectionHighlightRoomId = mStoredSelectionHighlightBeforeContextMenu;
+
+    updateSelectionWidget();
+
+    clearContextMenuSelectionRestoreState();
+}
+
+void T2DMap::clearContextMenuSelectionRestoreState()
+{
+    mStoredSelectionBeforeContextMenu.clear();
+    mStoredSelectionHighlightBeforeContextMenu = 0;
+    mStoredMultiSelectionStateBeforeContextMenu = false;
+    mRestoreSelectionAfterContextMenu = false;
+    mCancelContextMenuSelectionRestore = false;
+    mContextMenuRestoreQueued = false;
+}
+
+void T2DMap::storeSelectionBeforeContextMenu()
+{
+    if (mMultiSelectionSet.isEmpty()) {
+        clearContextMenuSelectionRestoreState();
+        return;
+    }
+
+    mStoredSelectionBeforeContextMenu = mMultiSelectionSet;
+    mStoredSelectionHighlightBeforeContextMenu = mMultiSelectionHighlightRoomId;
+    mStoredMultiSelectionStateBeforeContextMenu = mMultiSelection;
+    mRestoreSelectionAfterContextMenu = true;
+    mCancelContextMenuSelectionRestore = false;
+    mContextMenuRestoreQueued = false;
+}
+
+void T2DMap::cancelContextMenuSelectionRestore()
+{
+    if (mRestoreSelectionAfterContextMenu) {
+        mCancelContextMenuSelectionRestore = true;
+    }
 }
 
 bool T2DMap::InteractionDispatcher::dispatch(MapInteractionContext& context) const
@@ -285,28 +360,33 @@ bool T2DMap::eventFilter(QObject* watched, QEvent* event)
 {
     if (mActiveContextMenu && event && event->type() == QEvent::MouseButtonPress) {
         auto* mouseEvent = static_cast<QMouseEvent*>(event);
-        if (mouseEvent && mouseEvent->button() == Qt::RightButton) {
+        if (mouseEvent) {
+            const Qt::MouseButton button = mouseEvent->button();
+            if (button != Qt::LeftButton && button != Qt::RightButton) {
+                return QObject::eventFilter(watched, event);
+            }
             const QPoint globalPos = mouseEvent->globalPosition().toPoint();
             const QPoint localPos = mapFromGlobal(globalPos);
 
             if (rect().contains(localPos)) {
-                auto menu = mActiveContextMenu;
-                mActiveContextMenu.clear();
-
-                if (menu) {
-                    menu->close();
-                }
-
                 const QPointF localPosF(localPos);
                 const QPointF globalPosF(globalPos);
 
+                const Qt::MouseButtons buttonState = static_cast<Qt::MouseButtons>(button);
+
                 auto* pressEvent = new QMouseEvent(QEvent::MouseButtonPress, localPosF, localPosF, globalPosF,
-                    Qt::RightButton, Qt::RightButton, mouseEvent->modifiers());
+                    button, buttonState, mouseEvent->modifiers());
                 auto* releaseEvent = new QMouseEvent(QEvent::MouseButtonRelease, localPosF, localPosF, globalPosF,
-                    Qt::RightButton, Qt::NoButton, mouseEvent->modifiers());
+                    button, Qt::NoButton, mouseEvent->modifiers());
 
                 QCoreApplication::postEvent(this, pressEvent);
                 QCoreApplication::postEvent(this, releaseEvent);
+
+                auto menu = mActiveContextMenu;
+                if (menu) {
+                    menu->close();
+                }
+                mActiveContextMenu.clear();
 
                 return true;
             }
