@@ -674,75 +674,6 @@ bool TMap::gotoRoom(int r1, int r2)
     return findPath(r1, r2);
 }
 
-void TMap::addDirectionalRoute(QHash<unsigned int, route>& bestRoutes,
-                               const QMap<QString, int>& exitWeights,
-                               unsigned int source,
-                               TRoom* pSourceR,
-                               int target,
-                               quint8 direction,
-                               const QString& exitKey,
-                               const QSet<unsigned int>& unUsableRoomSet)
-{
-    // Skip self-edges and any exits that lead to rooms already known to be unusable.
-    if (target <= 0 || static_cast<int>(source) == target) {
-        return;
-    }
-
-    TLuaInterpreter* interpreter = mpHost ? mpHost->getLuaInterpreter() : nullptr;
-    TLuaInterpreter::ExitWeightFilterResult filterResult;
-    TLuaInterpreter::ExitWeightFilterResult* filterResultPtr = nullptr;
-    if (interpreter && interpreter->hasExitWeightFilter()) {
-        filterResult = interpreter->applyExitWeightFilter(static_cast<int>(source), exitKey);
-        if (filterResult.blocked) {
-            return;
-        }
-        filterResultPtr = &filterResult;
-    }
-
-    const bool filterOverridesBlocks = filterResultPtr && filterResultPtr->weightOverride.has_value();
-
-    if (pSourceR->isLocked && !filterOverridesBlocks) {
-        return;
-    }
-
-    const bool isSpecialExit = direction == DIR_OTHER;
-
-    if (!filterOverridesBlocks) {
-        if (isSpecialExit) {
-            if (pSourceR->hasSpecialExitLock(exitKey)) {
-                return;
-            }
-        } else if (pSourceR->hasExitLock(direction)) {
-            return;
-        }
-    }
-
-    TRoom* pTargetR = mpRoomDB->getRoom(target);
-    if (!pTargetR) {
-        return;
-    }
-
-    if (!filterOverridesBlocks && (pTargetR->isLocked || unUsableRoomSet.contains(target))) {
-        return;
-    }
-
-    route r;
-    r.direction = direction;
-    if (isSpecialExit) {
-        r.specialExitName = exitKey;
-    }
-
-    int cost = exitWeights.value(exitKey, pTargetR->getWeight());
-    if (filterOverridesBlocks) {
-        cost = filterResultPtr->weightOverride.value();
-    }
-    r.cost = cost;
-
-    if (!bestRoutes.contains(target) || bestRoutes.value(target).cost > r.cost) {
-        bestRoutes.insert(target, r);
-    }
-}
-
 void TMap::initGraph()
 {
     QElapsedTimer _time;
@@ -789,6 +720,72 @@ void TMap::initGraph()
     }
 
     // Now identify the routes between rooms, and pick out the best edges of parallel ones
+    auto addDirectionalRoute = [&](QHash<unsigned int, route>& bestRoutes,
+                                   const QMap<QString, int>& exitWeights,
+                                   unsigned int source,
+                                   TRoom* pSourceR,
+                                   int target,
+                                   quint8 direction,
+                                   const QString& exitKey) {
+        // Skip self-edges and any exits that lead to rooms already known to be unusable.
+        if (target <= 0 || static_cast<int>(source) == target) {
+            return;
+        }
+
+        TLuaInterpreter::ExitWeightFilterResult filterResult;
+        TLuaInterpreter::ExitWeightFilterResult* filterResultPtr = nullptr;
+        if (interpreter && interpreter->hasExitWeightFilter()) {
+            filterResult = interpreter->applyExitWeightFilter(static_cast<int>(source), exitKey);
+            if (filterResult.blocked) {
+                return;
+            }
+            filterResultPtr = &filterResult;
+        }
+
+        const bool filterOverridesBlocks = filterResultPtr && filterResultPtr->weightOverride.has_value();
+
+        if (pSourceR->isLocked && !filterOverridesBlocks) {
+            return;
+        }
+
+        const bool isSpecialExit = direction == DIR_OTHER;
+
+        if (!filterOverridesBlocks) {
+            if (isSpecialExit) {
+                if (pSourceR->hasSpecialExitLock(exitKey)) {
+                    return;
+                }
+            } else if (pSourceR->hasExitLock(direction)) {
+                return;
+            }
+        }
+
+        TRoom* pTargetR = mpRoomDB->getRoom(target);
+        if (!pTargetR) {
+            return;
+        }
+
+        if (!filterOverridesBlocks && (pTargetR->isLocked || unUsableRoomSet.contains(target))) {
+            return;
+        }
+
+        route r;
+        r.direction = direction;
+        if (isSpecialExit) {
+            r.specialExitName = exitKey;
+        }
+
+        int cost = exitWeights.value(exitKey, pTargetR->getWeight());
+        if (filterOverridesBlocks) {
+            cost = filterResultPtr->weightOverride.value();
+        }
+        r.cost = cost;
+
+        if (!bestRoutes.contains(target) || bestRoutes.value(target).cost > r.cost) {
+            bestRoutes.insert(target, r);
+        }
+    };
+
     for (auto l : locations) {
         unsigned const int source = l.id;
         TRoom* pSourceR = l.pR;
@@ -797,18 +794,18 @@ void TMap::initGraph()
         // value is data we will need to store later,
         QMap<QString, int> const exitWeights = pSourceR->getExitWeights();
 
-        addDirectionalRoute(bestRoutes, exitWeights, source, pSourceR, pSourceR->getNorth(), DIR_NORTH, qsl("n"), unUsableRoomSet);
-        addDirectionalRoute(bestRoutes, exitWeights, source, pSourceR, pSourceR->getEast(), DIR_EAST, qsl("e"), unUsableRoomSet);
-        addDirectionalRoute(bestRoutes, exitWeights, source, pSourceR, pSourceR->getSouth(), DIR_SOUTH, qsl("s"), unUsableRoomSet);
-        addDirectionalRoute(bestRoutes, exitWeights, source, pSourceR, pSourceR->getWest(), DIR_WEST, qsl("w"), unUsableRoomSet);
-        addDirectionalRoute(bestRoutes, exitWeights, source, pSourceR, pSourceR->getUp(), DIR_UP, qsl("up"), unUsableRoomSet);
-        addDirectionalRoute(bestRoutes, exitWeights, source, pSourceR, pSourceR->getDown(), DIR_DOWN, qsl("down"), unUsableRoomSet);
-        addDirectionalRoute(bestRoutes, exitWeights, source, pSourceR, pSourceR->getNortheast(), DIR_NORTHEAST, qsl("ne"), unUsableRoomSet);
-        addDirectionalRoute(bestRoutes, exitWeights, source, pSourceR, pSourceR->getSoutheast(), DIR_SOUTHEAST, qsl("se"), unUsableRoomSet);
-        addDirectionalRoute(bestRoutes, exitWeights, source, pSourceR, pSourceR->getSouthwest(), DIR_SOUTHWEST, qsl("sw"), unUsableRoomSet);
-        addDirectionalRoute(bestRoutes, exitWeights, source, pSourceR, pSourceR->getNorthwest(), DIR_NORTHWEST, qsl("nw"), unUsableRoomSet);
-        addDirectionalRoute(bestRoutes, exitWeights, source, pSourceR, pSourceR->getIn(), DIR_IN, qsl("in"), unUsableRoomSet);
-        addDirectionalRoute(bestRoutes, exitWeights, source, pSourceR, pSourceR->getOut(), DIR_OUT, qsl("out"), unUsableRoomSet);
+        addDirectionalRoute(bestRoutes, exitWeights, source, pSourceR, pSourceR->getNorth(), DIR_NORTH, qsl("n"));
+        addDirectionalRoute(bestRoutes, exitWeights, source, pSourceR, pSourceR->getEast(), DIR_EAST, qsl("e"));
+        addDirectionalRoute(bestRoutes, exitWeights, source, pSourceR, pSourceR->getSouth(), DIR_SOUTH, qsl("s"));
+        addDirectionalRoute(bestRoutes, exitWeights, source, pSourceR, pSourceR->getWest(), DIR_WEST, qsl("w"));
+        addDirectionalRoute(bestRoutes, exitWeights, source, pSourceR, pSourceR->getUp(), DIR_UP, qsl("up"));
+        addDirectionalRoute(bestRoutes, exitWeights, source, pSourceR, pSourceR->getDown(), DIR_DOWN, qsl("down"));
+        addDirectionalRoute(bestRoutes, exitWeights, source, pSourceR, pSourceR->getNortheast(), DIR_NORTHEAST, qsl("ne"));
+        addDirectionalRoute(bestRoutes, exitWeights, source, pSourceR, pSourceR->getSoutheast(), DIR_SOUTHEAST, qsl("se"));
+        addDirectionalRoute(bestRoutes, exitWeights, source, pSourceR, pSourceR->getSouthwest(), DIR_SOUTHWEST, qsl("sw"));
+        addDirectionalRoute(bestRoutes, exitWeights, source, pSourceR, pSourceR->getNorthwest(), DIR_NORTHWEST, qsl("nw"));
+        addDirectionalRoute(bestRoutes, exitWeights, source, pSourceR, pSourceR->getIn(), DIR_IN, qsl("in"));
+        addDirectionalRoute(bestRoutes, exitWeights, source, pSourceR, pSourceR->getOut(), DIR_OUT, qsl("out"));
 
         QMapIterator<QString, int> itSpecialExit(pSourceR->getSpecialExits());
         while (itSpecialExit.hasNext()) {
@@ -820,8 +817,7 @@ void TMap::initGraph()
                                 pSourceR,
                                 itSpecialExit.value(),
                                 DIR_OTHER,
-                                itSpecialExit.key(),
-                                unUsableRoomSet);
+                                itSpecialExit.key());
         } // End of while(itSpecialExit.hasNext())
 
         // Now we have eliminated possible duplicate and useless edges we can create and
